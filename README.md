@@ -57,6 +57,8 @@
 │
 ├── internal/
 │   ├── matching/                  # 撮合引擎 (分片 + 读写锁)
+│   ├── trading/margin/            # 杠杆交易 (强平引擎 + 资金费率)
+│   ├── trading/fix/               # FIX 4.4 协议 (转换 + Session)
 │   ├── order/                     # 订单服务 (校验/状态机/冻结/持久化)
 │   ├── user/                      # 用户服务 (JWT RS256/HS256 + bcrypt)
 │   ├── wallet/                    # 钱包服务 (BIP44/secp256k1 + 提现事务)
@@ -304,7 +306,13 @@ make clean           # 清理
 - 数据库迁移框架 (golang-migrate)
 - 安全加固 (安全头/CORS/TLS准备)
 
-### 🔲 Phase 3 — 规模化 (规划中)
+### ✅ Phase 3 — 规模化
+
+- [x] ClickHouse OLAP 数据管道 (成交/K线/审计日志自动写入)
+- [x] 多链支持 (Ethereum + BSC + Arbitrum + ERC20 扫描)
+- [x] 杠杆交易 (逐仓/全仓 + 强平引擎 + 资金费率)
+- [x] FIX 4.4 协议 (NewOrderSingle→下单, ExecutionReport←成交)
+- [x] 冷钱包 M-of-N 多签 (签名仪式 + 热→冷 sweep 调度)
 - 杠杆/合约交易
 - 多链支持 (Arbitrum/BSC/Optimism)
 - FIX 协议
