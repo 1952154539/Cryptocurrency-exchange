@@ -23,15 +23,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Redis-backed event bus for inter-process communication
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr()})
-	eventBus := events.NewRedisEventBus(rdb)
+
+	eventBus := createEventBus(cfg, rdb, "matching-engine")
 	defer eventBus.Close()
 
-	// Create matching engine
 	engine := matching.NewEngine(eventBus)
 
-	// Register trading pairs
 	symbols := []common.Symbol{"ETH-USDT"}
 	for _, sym := range symbols {
 		if err := engine.AddSymbol(sym); err != nil {
@@ -43,7 +41,7 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to start matching engine")
 	}
 
-	log.Info().Msg("matching engine running. Press Ctrl+C to stop.")
+	log.Info().Msg("matching engine running")
 	<-ctx.Done()
 
 	log.Info().Msg("shutting down matching engine")
@@ -54,4 +52,14 @@ func main() {
 	}
 	eventBus.Close()
 	os.Exit(0)
+}
+
+func createEventBus(cfg *config.Config, rdb *redis.Client, groupID string) events.EventBus {
+	if len(cfg.Kafka.Brokers) > 0 && cfg.Kafka.Brokers[0] != "" {
+		return events.NewKafkaEventBus(events.KafkaConfig{
+			Brokers: cfg.Kafka.Brokers,
+			GroupID: groupID,
+		})
+	}
+	return events.NewRedisEventBus(rdb)
 }

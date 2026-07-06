@@ -9,6 +9,7 @@ build:
 	go build -o bin/matching-engine ./cmd/matching-engine
 	go build -o bin/wallet-service ./cmd/wallet-service
 	go build -o bin/settlement-service ./cmd/settlement-service
+	go build -o bin/blockchain-monitor ./cmd/blockchain-monitor
 
 # Run individual services (for development)
 run-matching:

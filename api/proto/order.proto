@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package exchange;
+option go_package = "github.com/exchange/api/proto";
+
+// OrderService handles order placement, cancellation, and querying.
+service OrderService {
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc GetOpenOrders(GetOpenOrdersRequest) returns (GetOpenOrdersResponse);
+}
+
+message PlaceOrderRequest {
+  string user_id = 1;
+  string symbol = 2;
+  string side = 3;       // "buy" or "sell"
+  string type = 4;       // "market", "limit", "stop_loss", "stop_limit"
+  string time_in_force = 5;
+  string price = 6;
+  string stop_price = 7;
+  string quantity = 8;
+  string client_order_id = 9;
+}
+
+message PlaceOrderResponse {
+  string order_id = 1;
+  string client_order_id = 2;
+  string status = 3;
+  string filled_qty = 4;
+}
+
+message CancelOrderRequest {
+  string user_id = 1;
+  string symbol = 2;
+  string order_id = 3;
+}
+
+message CancelOrderResponse {
+  string status = 1;
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+}
+
+message GetOrderResponse {
+  string order_id = 1;
+  string user_id = 2;
+  string symbol = 3;
+  string side = 4;
+  string type = 5;
+  string price = 6;
+  string quantity = 7;
+  string filled_qty = 8;
+  string status = 9;
+  int64 created_at = 10;
+}
+
+message GetOpenOrdersRequest {
+  string user_id = 1;
+  string symbol = 2;
+}
+
+message GetOpenOrdersResponse {
+  repeated GetOrderResponse orders = 1;
+}

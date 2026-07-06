@@ -30,7 +30,8 @@ func main() {
 	defer pool.Close()
 
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr()})
-	eventBus := events.NewRedisEventBus(rdb)
+
+	eventBus := createEventBus(cfg, rdb, "settlement-service")
 	defer eventBus.Close()
 
 	feeSvc := settlement.NewFeeService(nil)
@@ -49,4 +50,14 @@ func main() {
 	_ = shutdownCtx
 	eventBus.Close()
 	os.Exit(0)
+}
+
+func createEventBus(cfg *config.Config, rdb *redis.Client, groupID string) events.EventBus {
+	if len(cfg.Kafka.Brokers) > 0 && cfg.Kafka.Brokers[0] != "" {
+		return events.NewKafkaEventBus(events.KafkaConfig{
+			Brokers: cfg.Kafka.Brokers,
+			GroupID: groupID,
+		})
+	}
+	return events.NewRedisEventBus(rdb)
 }

@@ -2,17 +2,23 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
+	pb "github.com/exchange/api/proto/gen"
 	"github.com/exchange/internal/config"
 	"github.com/exchange/internal/db/postgres"
 	"github.com/exchange/internal/events"
+	internalgrpc "github.com/exchange/internal/grpc"
 	"github.com/exchange/internal/telemetry"
 	"github.com/exchange/internal/wallet"
 	"github.com/go-redis/redis/v8"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
@@ -29,12 +35,12 @@ func main() {
 	defer pool.Close()
 
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr()})
-	eventBus := events.NewRedisEventBus(rdb)
+
+	eventBus := createEventBus(cfg, rdb, "wallet-service")
 	defer eventBus.Close()
 
 	walletSvc := wallet.NewService(pool, eventBus)
 
-	// Load master seed for HD wallet
 	if seedHex := os.Getenv("WALLET_MASTER_SEED_HEX"); seedHex != "" {
 		if err := walletSvc.LoadMasterSeed(seedHex); err != nil {
 			log.Fatal().Err(err).Msg("failed to load wallet master seed")
@@ -45,20 +51,44 @@ func main() {
 		log.Warn().Msg("WALLET_MASTER_SEED_HEX not set, using random keys (dev only)")
 	}
 
-	// Subscribe to deposit events from blockchain monitor
 	_ = eventBus.Subscribe(ctx, "deposit.detected", "wallet", func(ctx context.Context, evt *events.Event) error {
 		var deposit wallet.DepositEvent
 		if err := evt.GetPayload(&deposit); err != nil {
-			log.Warn().Err(err).Msg("failed to unmarshal deposit event")
 			return err
 		}
 		return walletSvc.ProcessDeposit(ctx, &deposit)
 	})
 
+	grpcServer := grpc.NewServer()
+	reflection.Register(grpcServer)
+	pb.RegisterWalletServiceServer(grpcServer, internalgrpc.NewWalletServer(walletSvc))
+
+	addr := fmt.Sprintf(":%d", cfg.Server.GRPCPort)
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal().Err(err).Str("addr", addr).Msg("failed to listen")
+	}
+
+	go func() {
+		log.Info().Str("addr", addr).Msg("wallet-service gRPC listening")
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatal().Err(err).Msg("gRPC server failed")
+		}
+	}()
+
 	log.Info().Msg("wallet service running")
 	<-ctx.Done()
-
 	log.Info().Msg("wallet service shutting down")
+	grpcServer.GracefulStop()
 	eventBus.Close()
-	os.Exit(0)
+}
+
+func createEventBus(cfg *config.Config, rdb *redis.Client, groupID string) events.EventBus {
+	if len(cfg.Kafka.Brokers) > 0 && cfg.Kafka.Brokers[0] != "" {
+		return events.NewKafkaEventBus(events.KafkaConfig{
+			Brokers: cfg.Kafka.Brokers,
+			GroupID: groupID,
+		})
+	}
+	return events.NewRedisEventBus(rdb)
 }

@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package exchange;
+option go_package = "github.com/exchange/api/proto";
+
+service MarketDataService {
+  rpc GetDepth(DepthRequest) returns (DepthResponse);
+  rpc GetTrades(TradesRequest) returns (TradesResponse);
+  rpc GetTicker(TickerRequest) returns (TickerResponse);
+  rpc GetKlines(KlinesRequest) returns (KlinesResponse);
+}
+
+message DepthRequest {
+  string symbol = 1;
+  int32 limit = 2;
+}
+
+message DepthResponse {
+  string symbol = 1;
+  repeated PriceLevel bids = 2;
+  repeated PriceLevel asks = 3;
+}
+
+message PriceLevel {
+  string price = 1;
+  string volume = 2;
+  int32 orders = 3;
+}
+
+message TradesRequest {
+  string symbol = 1;
+  int32 limit = 2;
+}
+
+message Trade {
+  string id = 1;
+  string price = 2;
+  string qty = 3;
+  string quote_qty = 4;
+  int64 time = 5;
+  bool is_buyer_maker = 6;
+}
+
+message TradesResponse {
+  repeated Trade trades = 1;
+}
+
+message TickerRequest {
+  string symbol = 1;
+}
+
+message TickerResponse {
+  string symbol = 1;
+  string open = 2;
+  string high = 3;
+  string low = 4;
+  string last = 5;
+  string volume = 6;
+  string change = 7;
+  string change_pct = 8;
+}
+
+message KlinesRequest {
+  string symbol = 1;
+  string interval = 2;
+  int32 limit = 3;
+}
+
+message Candlestick {
+  int64 open_time = 1;
+  string open = 2;
+  string high = 3;
+  string low = 4;
+  string close = 5;
+  string volume = 6;
+  int64 close_time = 7;
+}
+
+message KlinesResponse {
+  repeated Candlestick klines = 1;
+}

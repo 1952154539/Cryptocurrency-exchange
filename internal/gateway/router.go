@@ -6,6 +6,7 @@ import (
 
 	"github.com/exchange/internal/gateway/handler"
 	"github.com/exchange/internal/gateway/middleware"
+	"github.com/exchange/internal/telemetry"
 	"github.com/exchange/internal/user"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -18,16 +19,24 @@ func NewRouter(
 	marketHandler *handler.MarketHandler,
 	walletHandler *handler.WalletHandler,
 	rateLimiter *middleware.RateLimiter,
+	healthChecks map[string]func() error,
 ) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
+	r.Use(middleware.SecurityHeaders)
+	r.Use(middleware.CORSMiddleware)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
 	r.Use(rateLimiter.Middleware)
+
+	// Health & observability
+	r.Get("/health", telemetry.HealthHandler(healthChecks).ServeHTTP)
+	r.Get("/ready", telemetry.ReadyHandler().ServeHTTP)
+	r.Get("/metrics", telemetry.MetricsHandler().ServeHTTP)
 
 	// Public market data endpoints
 	r.Route("/api/v1", func(r chi.Router) {

@@ -125,6 +125,7 @@ type DepositDetectedPayload struct {
 	Amount        string `json:"amount"`
 	BlockNumber   uint64 `json:"block_number"`
 	Confirmations uint64 `json:"confirmations"`
+		RequiredConfirmations uint64 `json:"required_confirmations"`
 	UserID        string `json:"user_id"`
 }
 

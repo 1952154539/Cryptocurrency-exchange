@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package exchange;
+option go_package = "github.com/exchange/api/proto";
+
+service WalletService {
+  rpc GetDepositAddress(GetDepositAddressRequest) returns (GetDepositAddressResponse);
+  rpc RequestWithdrawal(WithdrawalRequest) returns (WithdrawalResponse);
+  rpc GetBalances(GetBalancesRequest) returns (GetBalancesResponse);
+}
+
+message GetDepositAddressRequest {
+  string user_id = 1;
+  string currency = 2;
+  string chain = 3;
+}
+
+message GetDepositAddressResponse {
+  string address = 1;
+  string chain = 2;
+}
+
+message WithdrawalRequest {
+  string user_id = 1;
+  string currency = 2;
+  string chain = 3;
+  string to_address = 4;
+  string amount = 5;
+  string fee = 6;
+}
+
+message WithdrawalResponse {
+  string withdrawal_id = 1;
+  string status = 2;
+}
+
+message GetBalancesRequest {
+  string user_id = 1;
+}
+
+message GetBalancesResponse {
+  repeated Balance balances = 1;
+}
+
+message Balance {
+  string currency = 1;
+  string available = 2;
+  string frozen = 3;
+}

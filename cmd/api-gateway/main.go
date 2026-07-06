@@ -123,8 +123,14 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(100, 50)
 	go rateLimiter.StartCleanup(ctx, 1*time.Minute, 5*time.Minute)
 
-	// Router
-	router := gateway.NewRouter(authSvc, orderHandler, marketHandler, walletHandler, rateLimiter)
+	// Health checks
+	var healthChecks map[string]func() error
+	if pool != nil {
+		healthChecks = make(map[string]func() error)
+		healthChecks["postgres"] = func() error { return pool.Ping(ctx) }
+		healthChecks["redis"] = func() error { return rdb.Ping(ctx).Err() }
+	}
+	router := gateway.NewRouter(authSvc, orderHandler, marketHandler, walletHandler, rateLimiter, healthChecks)
 
 	// HTTP Server
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
