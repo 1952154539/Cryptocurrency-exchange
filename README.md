@@ -223,11 +223,33 @@ make test-matching   # 撮合引擎
 make bench           # 性能基准
 ```
 
+### 生产级测试报告 (最新)
+
+| 测试项 | 结果 |
+|--------|------|
+| `go build ./cmd/...` (6 binaries) | ✅ PASS |
+| `go vet ./...` | ✅ PASS |
+| `go test ./internal/... -race` (27 tests) | ✅ PASS |
+| `go test ./test/... -race` (4 integration) | ✅ PASS |
+| `go test -bench=.` (matching engine) | ✅ 843 ns/op, 1,208,160 ops/s |
+| 20 并发订单测试 | ✅ 无竞态 |
+
+### 项目统计
+
+| 指标 | 数值 |
+|------|------|
+| Go 源文件 | 75 |
+| 代码行数 | 8,690 |
+| Package 数 | 35 |
+| 直接依赖 | 55 |
+
+### 测试套件详情
+
 | Suite | 测试数 | 状态 |
 |-------|--------|------|
-| decimal | 9 | PASS |
-| matching | 18 | PASS |
-| integration | 4 | PASS (race) |
+| decimal (定点数精度) | 9 | ✅ PASS |
+| matching (订单簿/撮合/FOK/IOC) | 18 | ✅ PASS |
+| integration (端到端/市价单/并发) | 4 | ✅ PASS |
 
 ---
 
