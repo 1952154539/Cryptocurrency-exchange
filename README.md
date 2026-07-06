@@ -1,4 +1,4 @@
-# Cryptocurrency Exchange
+# 加密货币交易所 / Cryptocurrency Exchange
 
 <div align="center">
 
@@ -6,71 +6,75 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Tests](https://img.shields.io/badge/tests-31%2F31%20PASS-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/race%20detector-clean-brightgreen)]()
+[![Race](https://img.shields.io/badge/race%20detector-clean-brightgreen)]()
 [![Phase](https://img.shields.io/badge/phase-production%20ready-blue)]()
 
-**Production-grade centralized cryptocurrency exchange written in Go**
+**Go 语言构建的生产级中心化加密货币交易所 / Production-grade centralized crypto exchange in Go**
 
 </div>
 
 ---
 
-## Table of Contents
+## 目录 / Table of Contents
 
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Quick Start](#quick-start)
-4. [API Reference](#api-reference)
-5. [Configuration](#configuration)
-6. [Deployment](#deployment)
-7. [Testing](#testing)
-8. [Monitoring](#monitoring)
-9. [Security](#security)
-10. [Project Structure](#project-structure)
-11. [Technology Stack](#technology-stack)
-12. [Roadmap](#roadmap)
-13. [Contributing](#contributing)
-14. [License](#license)
-
----
-
-## Overview
-
-A high-performance centralized cryptocurrency exchange featuring an in-memory matching engine, gRPC microservices, Kafka event streaming, multi-chain blockchain integration, risk management, KYC/AML compliance, margin trading, FIX protocol support, and cold wallet multisig.
-
-### Key Metrics
-
-| Metric | Value |
-|--------|-------|
-| Matching Throughput | 1,208,160 ops/s |
-| Matching Latency | 843 ns/op |
-| Order Types | Market, Limit, Stop-Loss, Stop-Limit |
-| Time in Force | GTC, IOC, FOK |
-| Max Leverage | 125x |
-| Supported Chains | Ethereum, BSC, Arbitrum |
-| Services | 6 (API Gateway, Matching, Settlement, Wallet, User, Blockchain Monitor) |
+[1. 概述 / Overview](#1-概述--overview) ·
+[2. 架构 / Architecture](#2-架构--architecture) ·
+[3. 快速开始 / Quick Start](#3-快速开始--quick-start) ·
+[4. API 参考 / API Reference](#4-api-参考--api-reference) ·
+[5. 配置 / Configuration](#5-配置--configuration) ·
+[6. 部署 / Deployment](#6-部署--deployment) ·
+[7. 测试 / Testing](#7-测试--testing) ·
+[8. 监控 / Monitoring](#8-监控--monitoring) ·
+[9. 安全 / Security](#9-安全--security) ·
+[10. 项目结构 / Project Structure](#10-项目结构--project-structure) ·
+[11. 技术栈 / Tech Stack](#11-技术栈--tech-stack) ·
+[12. 路线图 / Roadmap](#12-路线图--roadmap) ·
+[13. 贡献 / Contributing](#13-贡献--contributing) ·
+[14. 许可证 / License](#14-许可证--license)
 
 ---
 
-## Architecture
+## 1. 概述 / Overview
+
+一个高性能中心化加密货币交易所。包含内存撮合引擎、gRPC 微服务、Kafka 事件总线、多链区块链集成、风控、KYC/AML、杠杆交易、FIX 协议和冷钱包多签。
+
+> A high-performance centralized exchange featuring in-memory matching engine, gRPC microservices, Kafka event streaming, multi-chain blockchain integration, risk management, KYC/AML, margin trading, FIX protocol, and cold wallet multisig.
+
+### 关键指标 / Key Metrics
+
+| 指标 Metric | 值 Value |
+|-------------|----------|
+| 撮合吞吐 Matching Throughput | 1,208,160 ops/s |
+| 撮合延迟 Matching Latency | 843 ns/op |
+| 订单类型 Order Types | 市价/限价/止损/止盈 Market/Limit/Stop-Loss/Stop-Limit |
+| 有效期 Time in Force | GTC / IOC / FOK |
+| 最大杠杆 Max Leverage | 125x |
+| 支持链 Supported Chains | Ethereum / BSC / Arbitrum |
+| 服务数 Services | 6 个 (Gateway/Matching/Settlement/Wallet/User/Blockchain) |
+
+---
+
+## 2. 架构 / Architecture
+
+### 系统架构图 / System Architecture
 
 ```
                               ┌──────────────────────────────────────────┐
-                              │              Load Balancer               │
+                              │              负载均衡 / Load Balancer      │
                               └────────────────────┬─────────────────────┘
                                                    │
                               ┌────────────────────┴─────────────────────┐
-                              │         API Gateway (:8080)              │
-                              │   chi Router | JWT RS256 | Rate Limiter  │
-                              │   /health  /ready  /metrics  /api/v1/*   │
-                              └──┬──────────┬──────────┬─────────────────┘
+                              │          API 网关 / Gateway (:8080)       │
+                              │   chi Router | JWT RS256 | 限流/RateLimit │
+                              │   /health  /ready  /metrics  /api/v1/*    │
+                              └──┬──────────┬──────────┬──────────────────┘
                                  │ REST     │ gRPC     │
           ┌──────────────────────┤          │          ├──────────────────┐
           ▼                      ▼          ▼          ▼                  ▼
    ┌────────────┐   ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌──────────┐
-   │   User     │   │   Order    │  │   Wallet    │  │   Market   │  │   Fix    │
-   │  Service   │   │  Service   │  │  Service    │  │   Data     │  │  Gateway │
-   │  :50051    │   │  :50051    │  │  :50051     │  │  Service   │  │  :9880   │
+   │  用户服务   │   │  订单服务   │  │  钱包服务   │  │  行情服务   │  │  FIX     │
+   │  User Svc  │   │  Order Svc │  │ Wallet Svc │  │ Market Svc │  │ Gateway  │
+   │  :50051    │   │  :50051    │  │  :50051    │  │            │  │  :9880   │
    └─────┬──────┘   └─────┬──────┘  └──────┬──────┘  └─────┬──────┘  └────┬─────┘
          │                │                │                │              │
          └────────────────┼────────────────┼────────────────┼──────────────┘
@@ -80,8 +84,8 @@ A high-performance centralized cryptocurrency exchange featuring an in-memory ma
                           │    └───────────┬───────────┘    │
                           ▼                ▼                ▼
                    ┌────────────┐  ┌────────────┐  ┌────────────────┐
-                   │  Matching  │  │ Settlement │  │   Blockchain   │
-                   │   Engine   │  │  Service   │  │    Monitor     │
+                   │  撮合引擎   │  │  结算服务   │  │  区块链监控    │
+                   │  Matching  │  │ Settlement │  │  Blockchain    │
                    └─────┬──────┘  └─────┬──────┘  └───────┬────────┘
                          │               │                  │
                          ▼               ▼                  ▼
@@ -90,58 +94,62 @@ A high-performance centralized cryptocurrency exchange featuring an in-memory ma
                    └─────────────────────────────────────────────┘
 ```
 
-### Data Flow
+### 数据流 / Data Flow
 
 ```
-Order Placement:
-  Client ──REST──▶ API Gateway ──▶ Order Service ──▶ Matching Engine
-                                                          │
-                    ┌─────────────────────────────────────┤
-                    ▼                                     ▼
-              Trade Executed ◀─── Kafka ──── Order Matched
+下单 / Order:
+  客户端 ──REST──▶ API 网关 ──▶ 订单服务 ──▶ 撮合引擎
+      Client ──REST──▶ Gateway ──▶ Order Svc ──▶ Matching Engine
+                                                     │
+                    ┌────────────────────────────────┤
+                    ▼                                ▼
+              成交事件 ◀─── Kafka ──── 撮合完成
+         Trade Executed ◀─── Kafka ──── Matched
                     │
                     ▼
-            Settlement Service ──▶ PostgreSQL (balance update)
+            结算服务 ──▶ PostgreSQL (余额更新 / balance)
+         Settlement ──▶ PostgreSQL (update)
                     │
-                    ├──▶ ClickHouse (trade record)
-                    ├──▶ Redis (market data cache)
-                    └──▶ Kafka (notification event)
+                    ├──▶ ClickHouse (成交记录 / trade log)
+                    ├──▶ Redis (行情缓存 / market cache)
+                    └──▶ Kafka (通知事件 / notification)
 
-Deposit:
-  Blockchain ──▶ Block Monitor ──▶ Kafka ──▶ Wallet Service ──▶ PostgreSQL
-                                                                   │
-                                                              audit log
+充值 / Deposit:
+  区块链 ──▶ 区块监控 ──▶ Kafka ──▶ 钱包服务 ──▶ PostgreSQL
+  Chain ──▶ Block Monitor ──▶ Kafka ──▶ Wallet Svc ──▶ PostgreSQL
+                                                         │
+                                                   审计日志 / audit log
 ```
 
 ---
 
-## Quick Start
+## 3. 快速开始 / Quick Start
 
-### Prerequisites
+### 环境要求 / Prerequisites
 
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| Go | 1.25+ | Compilation |
-| Docker | 24+ | Infrastructure |
-| Make | 4+ | Build automation |
+| 依赖 | 版本 | 用途 / Purpose |
+|------|------|----------------|
+| Go | 1.25+ | 编译 / Compilation |
+| Docker | 24+ | 基础设施 / Infrastructure |
+| Make | 4+ | 构建自动化 / Build |
 
-### Local Development (5 minutes)
+### 5 分钟本地启动 / 5-Minute Setup
 
 ```bash
-# 1. Clone
+# 1. 克隆 / Clone
 git clone https://github.com/1952154539/Cryptocurrency-exchange.git
 cd Cryptocurrency-exchange
 
-# 2. Start infrastructure (PostgreSQL + Redis + Kafka + ClickHouse + Anvil)
+# 2. 启动基础设施 (PG + Redis + Kafka + ClickHouse + Anvil)
 docker compose up -d
 
-# 3. Initialize database schema
+# 3. 建表 / Init DB
 make migrate
 
-# 4. Build all services
+# 4. 编译 / Build
 make build
 
-# 5. Start services (6 terminals or use &)
+# 5. 启动 6 个服务 / Start all services
 export KAFKA_BROKERS=localhost:9092
 ./bin/matching-engine &
 ./bin/settlement-service &
@@ -150,54 +158,46 @@ export KAFKA_BROKERS=localhost:9092
 ./bin/api-gateway &
 ./bin/blockchain-monitor &
 
-# 6. Verify
+# 6. 验证 / Verify
 curl http://localhost:8080/health
-# {"status":"ok","services":{"postgres":"healthy","redis":"healthy"}}
-
+# → {"status":"ok","services":{"postgres":"healthy","redis":"healthy"}}
 curl http://localhost:8080/api/v1/ping
-# {"status":"ok"}
-```
-
-### One-Command Dev Startup
-
-```bash
-make docker-up && make migrate && make build && ./bin/api-gateway
+# → {"status":"ok"}
 ```
 
 ---
 
-## API Reference
+## 4. API 参考 / API Reference
 
-### Public Endpoints (No Auth)
+### 公开接口 / Public (No Auth)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Service health (DB, Redis, Kafka checks) |
-| `GET` | `/ready` | Kubernetes readiness probe |
-| `GET` | `/metrics` | Prometheus metrics endpoint |
-| `GET` | `/api/v1/ping` | Heartbeat |
-| `GET` | `/api/v1/time` | Server timestamp (ms) |
-| `GET` | `/api/v1/depth?symbol=ETH-USDT&limit=100` | Order book depth |
-| `GET` | `/api/v1/trades?symbol=ETH-USDT&limit=500` | Recent trades |
-| `GET` | `/api/v1/klines?symbol=ETH-USDT&interval=1h&limit=100` | Candlestick data |
-| `GET` | `/api/v1/ticker/24hr?symbol=ETH-USDT` | 24h price statistics |
+| 方法 | 端点 / Endpoint | 说明 / Description |
+|------|-----------------|--------------------|
+| `GET` | `/health` | 健康检查 (DB/Redis/Kafka) / Service health |
+| `GET` | `/ready` | K8s 就绪探针 / Readiness probe |
+| `GET` | `/metrics` | Prometheus 指标 / Metrics |
+| `GET` | `/api/v1/ping` | 心跳 / Heartbeat |
+| `GET` | `/api/v1/time` | 服务器时间 (ms) / Server time |
+| `GET` | `/api/v1/depth?symbol=ETH-USDT` | 订单簿深度 / Depth |
+| `GET` | `/api/v1/trades?symbol=ETH-USDT` | 最近成交 / Recent trades |
+| `GET` | `/api/v1/klines?symbol=ETH-USDT&interval=1h` | K线 / Candles |
+| `GET` | `/api/v1/ticker/24hr?symbol=ETH-USDT` | 24h 行情 / 24h ticker |
 
-### Private Endpoints (JWT Bearer Token)
+### 私有接口 / Private (JWT Bearer)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/v1/account` | Account info |
-| `POST` | `/api/v1/order` | Place order |
-| `DELETE` | `/api/v1/order` | Cancel order |
-| `GET` | `/api/v1/order?orderId=<id>` | Query order |
-| `GET` | `/api/v1/open-orders?symbol=ETH-USDT` | Open orders |
-| `GET` | `/api/v1/wallet/balances` | Wallet balances |
-| `POST` | `/api/v1/wallet/deposit-address` | Generate deposit address |
-| `POST` | `/api/v1/wallet/withdraw` | Request withdrawal |
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/api/v1/account` | 账户信息 / Account |
+| `POST` | `/api/v1/order` | 下单 / Place order |
+| `DELETE` | `/api/v1/order` | 撤单 / Cancel order |
+| `GET` | `/api/v1/order?orderId=<id>` | 查订单 / Query order |
+| `GET` | `/api/v1/open-orders` | 当前挂单 / Open orders |
+| `GET` | `/api/v1/wallet/balances` | 钱包余额 / Balances |
+| `POST` | `/api/v1/wallet/deposit-address` | 充值地址 / Deposit address |
+| `POST` | `/api/v1/wallet/withdraw` | 提现 / Withdraw |
 
-### Place Order Example
+### 下单示例 / Place Order
 
-**Request:**
 ```http
 POST /api/v1/order
 Authorization: Bearer <JWT_TOKEN>
@@ -213,407 +213,289 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
+响应 / Response:
 ```json
-{
-  "orderId": "ord_4H7XK2M9P1X",
-  "clientOrderId": "",
-  "status": "open",
-  "filledQty": "0"
-}
+{"orderId":"ord_4H7XK2M9P1X","clientOrderId":"","status":"open","filledQty":"0"}
 ```
 
-### gRPC Services
+### gRPC 服务 / gRPC Services
 
-| Service | Methods |
-|---------|---------|
+| 服务 Service | 方法 Methods |
+|-------------|-------------|
 | `UserService` | Register, Login, GetUser, UpdateKYC |
 | `WalletService` | GetDepositAddress, RequestWithdrawal, GetBalances |
 | `OrderService` | PlaceOrder, CancelOrder, GetOrder, GetOpenOrders |
 | `MarketDataService` | GetDepth, GetTrades, GetTicker, GetKlines |
 
-### Error Codes
+### 错误码 / Error Codes
 
-| HTTP Status | Meaning |
-|-------------|---------|
-| 200 | Success |
-| 400 | Invalid request (bad price, quantity, symbol) |
-| 401 | Missing or invalid JWT token |
-| 403 | Order does not belong to user |
-| 404 | Order not found |
-| 429 | Rate limit exceeded |
-| 500 | Internal server error |
-| 503 | Service degraded (health check) |
+| HTTP | 含义 Meaning |
+|------|-------------|
+| 200 | 成功 Success |
+| 400 | 无效请求 Invalid request |
+| 401 | 未认证 Unauthorized |
+| 403 | 无权访问 Forbidden |
+| 404 | 未找到 Not found |
+| 429 | 限流 Rate limited |
+| 500 | 服务器错误 Server error |
+| 503 | 服务降级 Degraded (health) |
 
 ---
 
-## Configuration
+## 5. 配置 / Configuration
 
-### Required (Production)
+### 生产必填 / Required (Production)
 
 ```bash
 export ENV=production
 export JWT_PRIVATE_KEY_PATH=/etc/keys/jwt-private.pem
 export JWT_PUBLIC_KEY_PATH=/etc/keys/jwt-public.pem
-export WALLET_MASTER_SEED_HEX=<64-character-hex-seed>
+export WALLET_MASTER_SEED_HEX=<64位16进制种子 / hex seed>
 export KAFKA_BROKERS=kafka-0:9092,kafka-1:9092,kafka-2:9092
 ```
 
-### Optional (with defaults)
+### 可选配置 / Optional (with defaults)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENV` | `development` | `production` enables strict validation |
-| `JWT_ACCESS_SECRET` | (dev default) | HMAC fallback signing key |
-| `JWT_REFRESH_SECRET` | (dev default) | HMAC refresh token key |
-| `PG_HOST` | `localhost` | PostgreSQL host |
-| `PG_PORT` | `5432` | PostgreSQL port |
-| `PG_USER` | `exchange` | PostgreSQL user |
-| `PG_PASSWORD` | `exchange_dev` | PostgreSQL password |
-| `PG_DATABASE` | `exchange` | PostgreSQL database |
-| `PG_MAX_CONNS` | `50` | Connection pool size |
-| `REDIS_HOST` | `localhost` | Redis host |
-| `REDIS_PORT` | `6379` | Redis port |
-| `REDIS_PASSWORD` | (empty) | Redis password |
-| `REDIS_DB` | `0` | Redis database number |
-| `KAFKA_GROUP_ID` | `exchange` | Consumer group ID |
-| `HTTP_PORT` | `8080` | API Gateway HTTP port |
-| `GRPC_PORT` | `50051` | gRPC server port |
-| `WS_PORT` | `8081` | WebSocket port (reserved) |
-| `METRICS_PORT` | `9090` | Metrics port (reserved) |
-| `ETH_RPC_URL` | `http://localhost:8545` | Ethereum RPC endpoint |
+| 变量 Variable | 默认值 Default | 说明 |
+|---------------|---------------|------|
+| `ENV` | `development` | `production` 启用严格校验 |
+| `PG_HOST` | `localhost` | PostgreSQL 地址 |
+| `PG_PORT` | `5432` | PostgreSQL 端口 |
+| `PG_USER` | `exchange` | PostgreSQL 用户 |
+| `PG_PASSWORD` | `exchange_dev` | PostgreSQL 密码 |
+| `PG_DATABASE` | `exchange` | PostgreSQL 库名 |
+| `PG_MAX_CONNS` | `50` | 连接池大小 |
+| `REDIS_HOST` | `localhost` | Redis 地址 |
+| `REDIS_PORT` | `6379` | Redis 端口 |
+| `REDIS_DB` | `0` | Redis 库号 |
+| `KAFKA_GROUP_ID` | `exchange` | 消费者组 ID |
+| `HTTP_PORT` | `8080` | API 网关端口 |
+| `GRPC_PORT` | `50051` | gRPC 端口 |
+| `ETH_RPC_URL` | `http://localhost:8545` | 以太坊 RPC |
 
 ---
 
-## Deployment
+## 6. 部署 / Deployment
 
-### Docker Compose (Dev)
+### Docker Compose (开发 / Dev)
 
 ```bash
-docker compose up -d       # PostgreSQL + Redis + Kafka + ClickHouse + Anvil
-docker compose down        # Stop all
+docker compose up -d       # 启动全部基础设施
+docker compose down        # 停止全部
 ```
 
-### Kubernetes (Production)
+### 服务启动顺序 / Startup Order
+
+1. **基础设施 Infrastructure**: PostgreSQL → Redis → Kafka → ClickHouse
+2. **数据库迁移 Migration**: `make migrate`
+3. **撮合引擎 Matching Engine**: 核心撮合
+4. **结算服务 Settlement**: 成交结算 (Kafka 消费者)
+5. **钱包服务 Wallet**: 充值提现处理
+6. **用户服务 User**: 认证
+7. **API 网关 Gateway**: 对外入口
+8. **区块链监控 Blockchain Monitor**: 链上扫描
+
+### 健康检查 / Health Check
 
 ```bash
-# Build images
-make docker-build
+curl http://localhost:8080/health
+# → {"status":"ok","services":{"postgres":"healthy","redis":"healthy"}}
 
-# Apply base configuration
-kubectl apply -k deployments/base
-
-# Apply production overlay
-kubectl apply -k deployments/overlays/production
-```
-
-### Service Startup Order
-
-1. **Infrastructure**: PostgreSQL, Redis, Kafka, ClickHouse
-2. **Database Migration**: `make migrate`
-3. **Matching Engine**: Core order matching
-4. **Settlement Service**: Trade settlement (Kafka consumer)
-5. **Wallet Service**: Deposit/withdrawal processing
-6. **User Service**: Authentication
-7. **API Gateway**: External API entry point
-8. **Blockchain Monitor**: On-chain deposit scanning
-
-### Health Check
-
-```bash
-# Service-level
-curl http://localhost:8080/health  | jq .
-# {
-#   "status": "ok",
-#   "timestamp": "2026-07-06T11:52:23Z",
-#   "services": {
-#     "postgres": "healthy",
-#     "redis": "healthy"
-#   }
-# }
-
-# Kubernetes probes
-curl http://localhost:8080/ready   # 200 = ready
-curl http://localhost:8080/metrics # Prometheus format
+curl http://localhost:8080/ready    # K8s 就绪探针
+curl http://localhost:8080/metrics  # Prometheus 指标
 ```
 
 ---
 
-## Testing
+## 7. 测试 / Testing
 
-### Quick Reference
+### 命令 / Commands
 
 ```bash
-make test            # All tests + race detector
-make test-matching   # Matching engine only
-make test-integration # Integration tests
-make bench           # Performance benchmarks
-make vet             # Static analysis
-make lint            # Linter (requires golangci-lint)
+make test             # 全部 + 竞态 / All + race
+make test-matching    # 撮合引擎 / Matching only
+make test-integration # 集成测试 / Integration
+make bench            # 性能基准 / Benchmark
+make vet              # 静态分析 / Static analysis
 ```
 
-### Production Test Report
+### 生产级测试报告 / Production Test Report
 
-| Test | Result |
-|------|--------|
+| 测试项 Test | 结果 Result |
+|-------------|-------------|
 | `go build ./cmd/...` (6 binaries) | ✅ PASS |
 | `go vet ./...` | ✅ PASS |
 | `go test ./internal/... -race` (27 tests) | ✅ PASS |
 | `go test ./test/... -race` (4 integration) | ✅ PASS |
-| `go test -bench=. -benchmem` | ✅ 843 ns/op, 19 allocs/op |
-| 20 concurrent order stress test | ✅ No race |
+| `go test -bench=.` | ✅ 843 ns/op, 19 allocs/op |
+| 20 并发订单压力测试 / Concurrent stress | ✅ 无竞态 / No race |
 
-### Test Suites
+### 测试套件 / Test Suites
 
-| Suite | Count | Coverage |
-|-------|-------|----------|
-| `decimal` | 9 | Fixed-point arithmetic, parsing, precision, rounding |
-| `matching` | 18 | Order book, FIFO, GTC/IOC/FOK, partial fills, cancel, snapshot |
-| `integration` | 4 | End-to-end flow, market orders, FOK validation, concurrent orders |
+| 套件 Suite | 数量 | 覆盖 Coverage |
+|------------|------|---------------|
+| `decimal` | 9 | 定点数运算/解析/精度/四舍五入 |
+| `matching` | 18 | 订单簿/FIFO/GTC/IOC/FOK/部分成交/撤单/快照 |
+| `integration` | 4 | 端到端/市价单/FOK/20并发 |
 
-### Benchmark
+### 项目统计 / Project Stats
 
-```
-BenchmarkOrderBook_Matching-8   1,208,160 ops   843.8 ns/op   512 B/op   19 allocs/op
-```
-
-### Project Statistics
-
-| Metric | Value |
-|--------|-------|
-| Go source files | 75 |
-| Lines of code | 8,690 |
-| Packages | 35 |
-| Direct dependencies | 55 |
-| Binary sizes | 11M - 30M |
+| 指标 Metric | 值 Value |
+|-------------|----------|
+| Go 源文件 Source files | 75 |
+| 代码行数 Lines of code | 8,690 |
+| Package 数 Packages | 35 |
+| 依赖 Dependencies | 55 |
+| 二进制大小 Binary size | 11M - 30M |
 
 ---
 
-## Monitoring
+## 8. 监控 / Monitoring
 
-### Prometheus Metrics
+### Prometheus 指标 / Metrics
 
 ```
-# HELP http_requests_total Total HTTP requests
-# HELP orders_matched_total Total matched orders
-# HELP orders_rejected_total Total rejected orders
-# HELP trades_settled_total Total settled trades
-# HELP settlement_errors_total Total settlement errors
-# HELP deposits_confirmed_total Total confirmed deposits
-# HELP withdrawals_requested_total Total withdrawal requests
+http_requests_total       HTTP 请求总数 / Total requests
+orders_matched_total      撮合订单数 / Matched orders
+orders_rejected_total     拒绝订单数 / Rejected orders
+trades_settled_total      成交结算数 / Settled trades
+settlement_errors_total   结算错误数 / Settlement errors
+deposits_confirmed_total  充值确认数 / Confirmed deposits
+withdrawals_requested_total 提现请求数 / Withdrawal requests
 ```
 
-### Grafana Dashboard (Recommended Panels)
+### 日志格式 / Log Format
 
-1. **Trading**: orders/sec, trades/sec, matching latency p50/p99
-2. **Infrastructure**: CPU, memory, goroutines, GC pause
-3. **Business**: active users, deposit/withdrawal volume, fee revenue
-4. **Alerts**: settlement errors > 0, matching latency > 10ms, service down
-
-### Logging
-
-All services use structured JSON logging (zerolog). Key fields: `level`, `time`, `message`, `user_id`, `order_id`, `symbol`, `error`.
+所有服务使用结构化 JSON 日志 (zerolog)。关键字段: `level`, `time`, `message`, `user_id`, `order_id`, `symbol`, `error`.
 
 ```json
-{"level":"info","time":"2026-07-06T11:52:23Z","user_id":"abc123","order_id":"ord_4H7X","symbol":"ETH-USDT","message":"order placed"}
+{"level":"info","time":"2026-07-06T11:52:23Z","user_id":"abc123",
+ "order_id":"ord_4H7X","symbol":"ETH-USDT","message":"order placed"}
 ```
 
 ---
 
-## Security
+## 9. 安全 / Security
 
-| Layer | Implementation |
-|-------|---------------|
-| **Authentication** | JWT RS256 (15min access + 7d refresh), HMAC HS256 fallback |
-| **API Authentication** | HMAC-SHA256 signature (5s window), implemented, not enabled by default |
-| **Password Hashing** | bcrypt, cost factor 12 |
-| **Rate Limiting** | Token bucket: 100 req/s per IP, 50 req/s per user, 20 req/s per order |
-| **HTTP Security** | CSP, HSTS (1 year), X-Frame-Options: DENY, X-Content-Type-Options: nosniff |
-| **Request Size** | 1 MB MaxBytesReader on all body-reading handlers |
-| **SQL Injection** | 100% parameterized queries via pgx |
-| **Double-Spend** | `UNIQUE(tx_hash, to_address)` + settlement trade_id idempotency |
-| **Optimistic Locking** | `version` column on accounts table prevents lost updates |
-| **Wallet** | BIP44/secp256k1, per-user account derivation, tx-level withdrawal |
-| **Data at Rest** | PostgreSQL with TLS (production), Redis AOF persistence |
-| **Secrets** | Environment variables, no hardcoded secrets in code, production enforcement |
-| **Shutdown** | Graceful shutdown with 30s timeout on all services |
+| 层面 Layer | 方案 Implementation |
+|-----------|-------------------|
+| **认证** | JWT RS256 (15min) + HMAC HS256 降级 / fallback |
+| **API 签名** | HMAC-SHA256 (5s 窗口/window)，已实现未默认启用 |
+| **密码** | bcrypt (cost=12) |
+| **限流** | 令牌桶: IP 100r/s, 用户 50r/s, 下单 20r/s |
+| **HTTP 头** | CSP + HSTS + X-Frame-Options + X-Content-Type-Options |
+| **请求体** | 1MB MaxBytesReader |
+| **SQL 注入** | 100% 参数化查询 / parameterized (pgx) |
+| **防双花** | `UNIQUE(tx_hash, to_address)` + 结算幂等 / idempotency |
+| **乐观锁** | accounts 表 `version` 列防并发覆盖 |
+| **钱包** | BIP44/secp256k1 + 用户隔离地址 + 事务提现 |
+| **密钥** | 环境变量，无硬编码，生产强校验 |
+| **关机** | 30s 优雅关闭 / graceful shutdown |
 
 ---
 
-## Project Structure
+## 10. 项目结构 / Project Structure
 
 ```
-├── api/proto/                     # gRPC service definitions + generated code
-│   ├── order/user/wallet/market.proto
-│   └── gen/                       # protoc output (.pb.go, _grpc.pb.go)
-│
-├── cmd/                           # Service entry points (6 binaries)
-│   ├── api-gateway/               # HTTP API server (:8080)
-│   ├── matching-engine/           # Order matching engine
-│   ├── settlement-service/        # Post-trade settlement
-│   ├── user-service/              # User management + auth
-│   ├── wallet-service/            # Wallet + deposits + withdrawals
-│   └── blockchain-monitor/        # On-chain transaction scanning
-│
+├── api/proto/                     # gRPC 定义 + 生成代码
+├── cmd/                           # 6 个服务入口
+│   ├── api-gateway/               # HTTP :8080
+│   ├── matching-engine/           # 撮合引擎
+│   ├── settlement-service/        # 结算服务
+│   ├── user-service/              # 用户服务
+│   ├── wallet-service/            # 钱包服务
+│   └── blockchain-monitor/        # 区块链监控
 ├── internal/
-│   ├── matching/                  # Matching engine (sharded + RWMutex)
-│   │   ├── engine.go              # Shard dispatcher + event emission
-│   │   ├── orderbook.go           # Price-sorted order book + FIFO queues
-│   │   ├── matcher.go             # Price-time priority matching algorithm
-│   │   ├── types.go               # Order, MatchResult, OrderType
-│   │   └── pool.go                # sync.Pool for GC optimization
-│   │
-│   ├── order/                     # Order service
-│   │   ├── service.go             # Place/cancel/get + balance freeze/unfreeze
-│   │   ├── validator.go           # Multi-step order validation
-│   │   ├── lifecycle.go           # State machine transitions
-│   │   ├── repository.go          # PostgreSQL persistence
-│   │   └── balance_provider.go    # DB-backed balance provider
-│   │
-│   ├── settlement/                # Settlement service
-│   │   ├── service.go             # Balance updates + optimistic locking + idempotency
-│   │   └── fees.go                # Fee calculation + 5-tier volume schedule
-│   │
-│   ├── user/                      # User service
-│   │   ├── service.go             # Registration + login + status
-│   │   └── auth.go                # JWT RS256/HS256 + HMAC signature verification
-│   │
-│   ├── wallet/                    # Wallet service
-│   │   ├── service.go             # Deposits + withdrawals + address generation
-│   │   ├── hdwallet.go            # BIP32/BIP44 HD wallet (secp256k1)
-│   │   └── cold/multisig.go       # M-of-N cold wallet multisig
-│   │
-│   ├── trading/                   # Advanced trading
-│   │   ├── margin/engine.go       # Leverage engine (liquidation + funding rate)
-│   │   └── fix/session.go         # FIX 4.4 protocol (NewOrderSingle/ExecutionReport)
-│   │
-│   ├── blockchain/                # Blockchain integration
-│   │   ├── ethereum/              # ETH client, block scanner, withdrawal processor
-│   │   └── adapter/chain.go       # Multi-chain abstraction (ETH/BSC/ARB + ERC20)
-│   │
-│   ├── events/                    # Event bus
-│   │   ├── types.go               # Event types + payload structs + interface
-│   │   ├── kafka_bus.go           # Kafka implementation (consumer group + ACK)
-│   │   ├── redis_bus.go           # Redis Pub/Sub fallback
-│   │   └── producer.go            # In-memory implementation (dev)
-│   │
-│   ├── gateway/                   # API Gateway
-│   │   ├── router.go              # chi route registration
-│   │   ├── handler/               # HTTP handlers (order, market, wallet)
-│   │   └── middleware/            # JWT, HMAC, rate limiting, security headers, CORS
-│   │
-│   ├── grpc/                      # gRPC layer
-│   │   ├── *_server.go            # Server implementations (4 services)
-│   │   └── client/                # Client wrappers (order, wallet, user)
-│   │
-│   ├── risk/                      # Risk management
-│   │   ├── circuit_breaker.go     # Price-based circuit breaker
-│   │   ├── withdrawal_limits.go   # Per-currency withdrawal limits
-│   │   └── blacklist.go           # IP/UID/Address blacklist
-│   │
+│   ├── matching/                  # 撮合引擎 (分片 + RWMutex)
+│   ├── order/                     # 订单 (校验/冻结/状态机/持久化)
+│   ├── settlement/                # 结算 (乐观锁/幂等/冻结同步)
+│   ├── user/                      # 用户 (JWT RS256/HS256 + bcrypt)
+│   ├── wallet/                    # 钱包 (BIP44/secp256k1)
+│   │   └── cold/multisig.go       # 冷钱包 M-of-N 多签
+│   ├── trading/                   # 高级交易
+│   │   ├── margin/engine.go       # 杠杆 (强平 + 资金费率)
+│   │   └── fix/session.go         # FIX 4.4 协议
+│   ├── blockchain/                # 区块链 (ETH 扫描/提现/多链)
+│   ├── events/                    # 事件总线 (Kafka + Redis + Memory)
+│   ├── gateway/                   # API 网关 (chi + 中间件)
+│   ├── grpc/                      # gRPC Server + Client
+│   ├── risk/                      # 风控 (熔断/限额/黑名单)
 │   ├── kyc/                       # KYC/AML
-│   │   ├── service.go             # Verification workflow (submit/approve/reject)
-│   │   └── aml_checker.go         # Sanctions list screening
-│   │
-│   ├── marketdata/                # Market data service
-│   │   └── service.go             # Order book depth, trades, ticker, klines, Redis cache
-│   │
-│   ├── db/                        # Data access
-│   │   ├── postgres/              # pgxpool connection pool
-│   │   ├── redis/                 # Redis client
-│   │   ├── clickhouse/writer.go   # ClickHouse OLAP writer
-│   │   └── migrate/               # golang-migrate runner
-│   │
-│   ├── telemetry/                 # Observability
-│   │   ├── logging.go             # Structured logging (zerolog)
-│   │   └── metrics.go             # Prometheus metrics + health/ready endpoints
-│   │
-│   ├── common/                    # Shared utilities
-│   │   ├── decimal/               # 18-decimal fixed-point arithmetic
-│   │   ├── types.go               # Domain types (Side, OrderType, Status, etc.)
-│   │   ├── errors.go              # Domain errors
-│   │   └── idgen.go               # ULID-based ID generation
-│   │
-│   └── config/                    # Configuration
-│       └── config.go              # Environment variable loader with defaults
-│
-├── migrations/                    # Database migrations (up/down SQL)
-│   ├── 001_init.up.sql            # Core schema (12 tables)
-│   ├── 001_init.down.sql
-│   ├── 002_kyc.up.sql             # KYC verifications table
-│   └── 002_kyc.down.sql
-│
-├── test/integration/              # Integration tests
-├── docker-compose.yml             # Dev infrastructure (PG + Redis + Kafka + ClickHouse + Anvil)
-├── Makefile                       # Build, test, deploy commands
-└── go.mod                         # Go module definition
+│   ├── marketdata/                # 行情数据
+│   ├── db/                        # Postgres/Redis/ClickHouse + 迁移
+│   ├── telemetry/                 # 日志 + Prometheus + 健康检查
+│   ├── common/                    # 公共 (定点数/类型/错误/ID)
+│   └── config/                    # 配置管理
+├── migrations/                    # 迁移 SQL
+├── test/integration/              # 集成测试
+├── docker-compose.yml
+├── Makefile
+└── go.mod
 ```
 
 ---
 
-## Technology Stack
+## 11. 技术栈 / Tech Stack
 
-| Category | Technology | Version |
-|----------|-----------|---------|
-| Language | Go | 1.25 |
-| HTTP Router | go-chi/chi | v5.0.12 |
-| Database Driver | pgx | v5.5.5 |
-| Cache | go-redis | v8.11.5 |
-| Message Queue | segmentio/kafka-go | v0.4.51 |
-| gRPC | google.golang.org/grpc | v1.79.1 |
-| JWT | golang-jwt | v5.2.1 |
-| Blockchain | go-ethereum | v1.17.4 |
-| ECC | btcec/secp256k1 | v2.5.0 |
-| Database Migration | golang-migrate | v4.19.1 |
-| OLAP | clickhouse-go | v2.47.0 |
-| FIX Protocol | quickfixgo | v0.9.10 |
-| Logging | zerolog | v1.32.0 |
-| ID Generation | ulid | v2.1.0 |
-| Password Hashing | x/crypto (bcrypt) | v0.53.0 |
+| 类别 Category | 技术 Technology | 版本 Version |
+|---------------|---------------|--------------|
+| 语言 Language | Go | 1.25 |
+| HTTP | go-chi/chi | v5 |
+| 数据库 DB | pgx (PostgreSQL 16) | v5 |
+| 缓存 Cache | go-redis | v8 |
+| 消息 Message | segmentio/kafka-go | v0.4 |
+| gRPC | google.golang.org/grpc | v1.79 |
+| 认证 Auth | golang-jwt | v5 |
+| 区块链 Chain | go-ethereum + btcec/secp256k1 | v1.17 / v2.5 |
+| 迁移 Migration | golang-migrate | v4 |
+| OLAP | clickhouse-go | v2.47 |
+| FIX | quickfixgo | v0.9 |
+| 日志 Log | zerolog | v1.32 |
+| ID | ulid | v2 |
 
 ---
 
-## Roadmap
+## 12. 路线图 / Roadmap
 
-### ✅ Phase 1 — Core MVP
-Matching engine · Order/Settlement/User/Wallet services · API Gateway · JWT auth · Memory/Redis event bus · 27 unit tests · 4 integration tests
+### ✅ Phase 1 — 核心 MVP / Core
+撮合引擎 · 订单/结算/用户/钱包 · API 网关 · JWT · 事件总线 · 31 测试
 
-### ✅ Phase 2 — Production Hardening
-gRPC microservices · Kafka event bus · Blockchain monitor · Risk management (circuit breaker, limits, blacklist) · KYC/AML · Health checks + Prometheus metrics · Security headers + CORS · Database migration framework
+### ✅ Phase 2 — 生产加固 / Production
+gRPC · Kafka · 区块链 · 风控 · KYC/AML · 健康检查 + Prometheus · 安全加固
 
-### ✅ Phase 3 — Scale
-ClickHouse OLAP pipeline · Multi-chain support (ETH/BSC/ARB + ERC20) · Margin/perpetual trading · FIX 4.4 protocol · Cold wallet M-of-N multisig
+### ✅ Phase 3 — 规模化 / Scale
+ClickHouse · 多链 · 杠杆/合约 · FIX 4.4 · 冷钱包多签
 
 ---
 
-## Contributing
+## 13. 贡献 / Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feat/amazing-feature`)
-3. Run tests (`make test`)
-4. Commit changes (`git commit -m 'feat: amazing feature'`)
-5. Push (`git push origin feat/amazing-feature`)
-6. Open a Pull Request
+1. Fork 仓库
+2. 创建分支 `git checkout -b feat/功能名`
+3. 运行测试 `make test`
+4. 提交 `git commit -m 'feat: 功能描述'`
+5. 推送 `git push origin feat/功能名`
+6. 发起 Pull Request
 
-### Commit Convention
+### 提交规范 / Commit Convention
 
 ```
-feat:     New feature
-fix:      Bug fix
-docs:     Documentation
-test:     Tests
-refactor: Code restructuring
-perf:     Performance improvement
+feat:     新功能 / New feature
+fix:      修复 / Bug fix
+docs:     文档 / Documentation
+test:     测试 / Tests
+refactor: 重构 / Refactor
+perf:     性能 / Performance
 ```
 
 ---
 
-## License
+## 14. 许可证 / License
 
 MIT License
 
 ---
 
 <div align="center">
-  <sub>Built with ❤️ in Go</sub>
+  <sub>Built with Go • 75 files • 8,690 LOC • 35 packages</sub>
 </div>
