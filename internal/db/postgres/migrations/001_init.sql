@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     user_id         UUID NOT NULL REFERENCES users(id),
     currency        VARCHAR(20) NOT NULL,
     balance         NUMERIC(36,18) NOT NULL DEFAULT 0,
-    frozen          NUMERIC(36,18) NOT NULL DEFAULT 0,
+    frozen_balance          NUMERIC(36,18) NOT NULL DEFAULT 0,
     version         BIGINT NOT NULL DEFAULT 0,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),

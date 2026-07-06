@@ -88,7 +88,7 @@
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| Go | 1.25+ | 编译运行 |
+| Go | 1.25+ (CI: 1.23) | 编译运行 |
 | Docker | 24+ | 基础设施 |
 | PostgreSQL | 16 | 业务数据 |
 | Redis | 7 | 缓存/事件总线 |
@@ -134,6 +134,7 @@ export PG_HOST=postgres.internal
 export REDIS_HOST=redis.internal
 export HTTP_PORT=8080
 export GRPC_PORT=50051
+# 所有环境变量见 internal/config/config.go
 ```
 
 ---
@@ -170,8 +171,8 @@ POST   /api/v1/wallet/withdraw                       提现
 ### gRPC 服务
 
 ```
-OrderService    :50053   PlaceOrder / CancelOrder / GetOrder / GetOpenOrders
-WalletService   :50052   GetDepositAddress / RequestWithdrawal / GetBalances
+OrderService            PlaceOrder / CancelOrder / GetOrder / GetOpenOrders
+WalletService   :50051   GetDepositAddress / RequestWithdrawal / GetBalances
 UserService     :50051   Register / Login / GetUser / UpdateKYC
 MarketDataService        GetDepth / GetTrades / GetTicker / GetKlines
 ```
@@ -187,7 +188,7 @@ MarketDataService        GetDepth / GetTrades / GetTicker / GetKlines
 | 并发模型 | 每交易对独立 goroutine 分片，RWMutex 读写安全 |
 | 内存管理 | sync.Pool 复用 OrderNode |
 | 性能 | ~820 ns/op, ~1,470,000 ops/s (i5-11300H) |
-| 订单类型 | Market / Limit / Stop-Loss / Stop-Limit |
+| 订单类型 | Market / Limit (Stop-Loss/Stop-Limit defined, engine pending) |
 | 有效期 | GTC / IOC / FOK |
 
 ---
@@ -207,14 +208,14 @@ MarketDataService        GetDepth / GetTrades / GetTicker / GetKlines
 | 层面 | 方案 |
 |------|------|
 | Web 认证 | JWT RS256 (15min) + HMAC HS256 降级 |
-| API 认证 | HMAC-SHA256 签名，5秒窗口防重放 |
+| API 认证 | HMAC-SHA256 签名（已实现，未默认启用），5秒窗口防重放 |
 | 限流 | 令牌桶：IP 100r/s，用户 50r/s |
 | 安全头 | CSP / HSTS / X-Frame-Options / X-Content-Type-Options |
 | SQL 注入 | 100% 参数化查询 (pgx) |
 | 密码 | bcrypt (cost=12) |
 | 防双花 | UNIQUE (tx_hash, to_address) + 结算幂等 |
 | 钱包 | BIP44/secp256k1，用户隔离地址，提现事务 |
-| 请求体 | 1MB MaxBytesReader 限制 |
+| 请求体 | 1MB MaxBytesReader 限制 (order handler) |
 
 ---
 
@@ -244,8 +245,8 @@ make bench           # 性能基准 (~1.47M ops/s)
 
 | Suite | 状态 |
 |-------|------|
-| decimal | 8/8 PASS |
-| matching | 13/13 PASS |
+| decimal | 9/9 PASS |
+| matching | 18/18 PASS |
 | integration | PASS (竞态检测通过) |
 
 ---
@@ -278,7 +279,7 @@ make clean           # 清理
 | 认证 | golang-jwt v5 + RSA |
 | 钱包 | btcec/secp256k1 + BIP32/44 |
 | 区块链 | go-ethereum |
-| 迁移 | golang-migrate v4 |
+| 迁移 | golang-migrate v4 (Makefile 使用 psql 直连) |
 | 日志 | rs/zerolog |
 | ID | oklog/ulid v2 |
 
