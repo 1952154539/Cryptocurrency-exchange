@@ -39,12 +39,17 @@ func (h *OrderHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		ClientOrderID string `json:"clientOrderId,omitempty"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	price, _ := decimal.NewFromString(req.Price)
+	price, err := decimal.NewFromString(req.Price)
+	if err != nil && req.Price != "" {
+		WriteError(w, http.StatusBadRequest, "invalid price")
+		return
+	}
 	stopPrice, _ := decimal.NewFromString(req.StopPrice)
 	quantity, err := decimal.NewFromString(req.Quantity)
 	if err != nil {
@@ -91,6 +96,7 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		OrderID string `json:"orderId"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
 		return

@@ -10,6 +10,8 @@ import (
 // MatchOrder processes an incoming taker order against the resting order book.
 // Returns the list of match results and the remaining order (nil if fully filled).
 func (ob *OrderBook) MatchOrder(order *Order) ([]*MatchResult, *Order) {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
 	var matches []*MatchResult
 
 	switch {

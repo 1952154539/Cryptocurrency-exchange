@@ -16,6 +16,7 @@ func NewRouter(
 	authSvc *user.AuthService,
 	orderHandler *handler.OrderHandler,
 	marketHandler *handler.MarketHandler,
+	walletHandler *handler.WalletHandler,
 	rateLimiter *middleware.RateLimiter,
 ) http.Handler {
 	r := chi.NewRouter()
@@ -53,17 +54,15 @@ func NewRouter(
 			r.Delete("/order", orderHandler.CancelOrder)
 			r.Get("/order", orderHandler.GetOrder)
 			r.Get("/open-orders", orderHandler.GetOpenOrders)
+
+			if walletHandler != nil {
+				r.Get("/wallet/balances", walletHandler.GetBalances)
+				r.Post("/wallet/deposit-address", walletHandler.GetDepositAddress)
+				r.Post("/wallet/withdraw", walletHandler.Withdraw)
+			}
 		})
 
-		// Private - HMAC auth for trading API
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.HMACAuth(nil)) // In production, provide a real key getter
-
-			r.Post("/order", orderHandler.PlaceOrder)
-			r.Delete("/order", orderHandler.CancelOrder)
-			r.Get("/order", orderHandler.GetOrder)
-			r.Get("/open-orders", orderHandler.GetOpenOrders)
-		})
+		// HMAC auth: use middleware.HMACAuth(keyGetter) to enable API-key based auth
 	})
 
 	return r

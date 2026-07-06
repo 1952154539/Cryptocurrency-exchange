@@ -5,12 +5,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/exchange/internal/config"
 	"github.com/exchange/internal/db/postgres"
 	"github.com/exchange/internal/events"
 	"github.com/exchange/internal/settlement"
 	"github.com/exchange/internal/telemetry"
+	"github.com/go-redis/redis/v8"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,7 +29,10 @@ func main() {
 	}
 	defer pool.Close()
 
-	eventBus := events.NewMemoryEventBus()
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr()})
+	eventBus := events.NewRedisEventBus(rdb)
+	defer eventBus.Close()
+
 	feeSvc := settlement.NewFeeService(nil)
 	settleSvc := settlement.NewService(pool, feeSvc, eventBus)
 
@@ -37,6 +42,11 @@ func main() {
 
 	log.Info().Msg("settlement service running")
 	<-ctx.Done()
+
 	log.Info().Msg("settlement service shutting down")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	_ = shutdownCtx
+	eventBus.Close()
 	os.Exit(0)
 }

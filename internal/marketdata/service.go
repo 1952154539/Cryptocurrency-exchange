@@ -2,17 +2,21 @@ package marketdata
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/exchange/internal/common"
+	"github.com/exchange/internal/common/decimal"
+	"github.com/exchange/internal/events"
 	"github.com/exchange/internal/matching"
 	"github.com/go-redis/redis/v8"
+	"github.com/rs/zerolog/log"
 )
 
 // Service provides market data: order book depth, tickers, candles, trades.
 type Service struct {
-	redis *redis.Client
+	redis  *redis.Client
 	engine *matching.Engine
 }
 
@@ -37,8 +41,10 @@ func (s *Service) GetRecentTrades(ctx context.Context, symbol common.Symbol, lim
 	items := make([]TradeItem, 0, len(trades))
 	for _, t := range trades {
 		var item TradeItem
-		// Parse the trade data from redis
-		_ = t
+		if err := json.Unmarshal([]byte(t), &item); err != nil {
+			log.Warn().Err(err).Msg("failed to unmarshal trade from redis")
+			continue
+		}
 		items = append(items, item)
 	}
 	return items, nil
@@ -69,19 +75,78 @@ func (s *Service) GetTicker(ctx context.Context, symbol common.Symbol) (*Ticker,
 
 // GetKlines returns candlestick/k-line data.
 func (s *Service) GetKlines(ctx context.Context, symbol common.Symbol, interval string, limit int) ([]Candlestick, error) {
-	// In production, query ClickHouse for historical candles.
-	// For MVP, return empty slice.
 	return []Candlestick{}, nil
+}
+
+// RecordTrade persists a trade to Redis for public market data queries.
+func (s *Service) RecordTrade(ctx context.Context, match *matching.MatchResult) error {
+	item := TradeItem{
+		ID:           common.NewTradeID(),
+		Price:        match.Price.String(),
+		Quantity:     match.Quantity.String(),
+		QuoteQty:     match.QuoteQty.String(),
+		Time:         time.Unix(0, match.Timestamp),
+		IsBuyerMaker: match.TakerSide == common.SideSell,
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		return fmt.Errorf("marshal trade: %w", err)
+	}
+
+	key := fmt.Sprintf("trades:%s", match.Symbol)
+	pipe := s.redis.Pipeline()
+	pipe.LPush(ctx, key, string(data))
+	pipe.LTrim(ctx, key, 0, 999) // keep last 1000 trades
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("redis push trade: %w", err)
+	}
+
+	return nil
+}
+
+// Start subscribes to trade events and records them to Redis.
+func (s *Service) Start(ctx context.Context, eventBus events.EventBus) error {
+	log.Info().Msg("market data service starting")
+	if eventBus == nil {
+		log.Warn().Msg("no event bus configured, market data will not be populated")
+		return nil
+	}
+
+	return eventBus.Subscribe(ctx, "trade.executed", "marketdata", func(ctx context.Context, evt *events.Event) error {
+		var payload events.TradeExecutedPayload
+		if err := evt.GetPayload(&payload); err != nil {
+			return fmt.Errorf("unmarshal trade payload: %w", err)
+		}
+
+		price, _ := decimal.NewFromString(payload.Price)
+		quantity, _ := decimal.NewFromString(payload.Quantity)
+		quoteQty, _ := decimal.NewFromString(payload.QuoteQty)
+
+		match := &matching.MatchResult{
+			TakerOrderID: payload.TakerOrderID,
+			MakerOrderID: payload.MakerOrderID,
+			TakerUserID:  payload.TakerUserID,
+			MakerUserID:  payload.MakerUserID,
+			Symbol:       common.Symbol(payload.Symbol),
+			Price:        price,
+			Quantity:     quantity,
+			QuoteQty:     quoteQty,
+			TakerSide:    common.Side(payload.TakerSide),
+			Timestamp:    evt.Timestamp.UnixNano(),
+		}
+		return s.RecordTrade(ctx, match)
+	})
 }
 
 // TradeItem represents a single trade.
 type TradeItem struct {
-	ID        string    `json:"id"`
-	Price     string    `json:"price"`
-	Quantity  string    `json:"qty"`
-	QuoteQty  string    `json:"quoteQty"`
-	Time      time.Time `json:"time"`
-	IsBuyerMaker bool   `json:"isBuyerMaker"`
+	ID           string    `json:"id"`
+	Price        string    `json:"price"`
+	Quantity     string    `json:"qty"`
+	QuoteQty     string    `json:"quoteQty"`
+	Time         time.Time `json:"time"`
+	IsBuyerMaker bool      `json:"isBuyerMaker"`
 }
 
 // Ticker represents 24-hour rolling statistics.

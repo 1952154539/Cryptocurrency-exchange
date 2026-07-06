@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/exchange/internal/common"
-	"github.com/exchange/internal/common/decimal"
 	"github.com/exchange/internal/events"
 	"github.com/rs/zerolog/log"
 )
@@ -22,16 +21,17 @@ type Engine struct {
 
 // shard represents a single trading pair's order book and processing loop.
 type shard struct {
-	symbol    common.Symbol
-	book      *OrderBook
-	ordersIn  chan *shardOrder
-	stopCh    chan struct{}
-	eventBus  events.EventBus
+	symbol   common.Symbol
+	book     *OrderBook
+	ordersIn chan *shardOrder
+	stopCh   chan struct{}
+	eventBus events.EventBus
 }
 
 type shardOrder struct {
-	order     *Order
-	resultCh  chan shardResult
+	order    *Order
+	resultCh chan shardResult
+	ctx      context.Context
 }
 
 type shardResult struct {
@@ -101,6 +101,7 @@ func (e *Engine) PlaceOrder(ctx context.Context, order *Order) ([]*MatchResult, 
 	so := &shardOrder{
 		order:    order,
 		resultCh: make(chan shardResult, 1),
+		ctx:      ctx,
 	}
 
 	select {
@@ -127,7 +128,6 @@ func (e *Engine) CancelOrder(ctx context.Context, symbol common.Symbol, orderID 
 		return nil, fmt.Errorf("symbol %s not found", symbol)
 	}
 
-	// For cancel, we use a special cancel command through the order channel
 	so := &shardOrder{
 		order: &Order{
 			OrderID: orderID,
@@ -135,6 +135,7 @@ func (e *Engine) CancelOrder(ctx context.Context, symbol common.Symbol, orderID 
 			Side:    "cancel",
 		},
 		resultCh: make(chan shardResult, 1),
+		ctx:      ctx,
 	}
 
 	select {
@@ -191,7 +192,12 @@ func (e *Engine) Stop(ctx context.Context) error {
 
 	e.mu.Lock()
 	for symbol, s := range e.shards {
-		close(s.stopCh)
+		select {
+		case <-s.stopCh:
+			// already closed
+		default:
+			close(s.stopCh)
+		}
 		delete(e.shards, symbol)
 	}
 	e.mu.Unlock()
@@ -214,13 +220,17 @@ func (s *shard) run() {
 // processOrder handles a single order within the shard's goroutine.
 func (s *shard) processOrder(so *shardOrder) {
 	order := so.order
+	ctx := so.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// Handle cancellation
 	if order.Side == "cancel" {
 		cancelled := s.book.CancelOrder(order.OrderID)
 		so.resultCh <- shardResult{cancelled: cancelled}
 		if cancelled != nil {
-			s.emitOrderCancelled(cancelled)
+			s.emitOrderCancelled(ctx, cancelled)
 		}
 		return
 	}
@@ -229,7 +239,7 @@ func (s *shard) processOrder(so *shardOrder) {
 	if order.TimeInForce == common.TIF_FOK && !s.book.CanFillFOK(order) {
 		order.Status = common.OrderStatusRejected
 		so.resultCh <- shardResult{remaining: order}
-		s.emitOrderRejected(order)
+		s.emitOrderRejected(ctx, order)
 		return
 	}
 
@@ -238,13 +248,13 @@ func (s *shard) processOrder(so *shardOrder) {
 		if order.Side == common.SideBuy && s.book.BestAsk().IsZero() {
 			order.Status = common.OrderStatusRejected
 			so.resultCh <- shardResult{remaining: order}
-			s.emitOrderRejected(order)
+			s.emitOrderRejected(ctx, order)
 			return
 		}
 		if order.Side == common.SideSell && s.book.BestBid().IsZero() {
 			order.Status = common.OrderStatusRejected
 			so.resultCh <- shardResult{remaining: order}
-			s.emitOrderRejected(order)
+			s.emitOrderRejected(ctx, order)
 			return
 		}
 	}
@@ -262,15 +272,15 @@ func (s *shard) processOrder(so *shardOrder) {
 
 	// Emit trade events
 	for _, m := range matches {
-		s.emitTradeExecuted(m)
+		s.emitTradeExecuted(ctx, m)
 	}
 
 	// Emit order events
 	if len(matches) > 0 {
 		if remaining == nil || remaining.Status == common.OrderStatusFilled {
-			s.emitOrderFilled(order, matches)
+			s.emitOrderFilled(ctx, order, matches)
 		} else {
-			s.emitOrderPartiallyFilled(order, matches)
+			s.emitOrderPartiallyFilled(ctx, order, matches)
 		}
 	}
 
@@ -279,7 +289,7 @@ func (s *shard) processOrder(so *shardOrder) {
 		remaining.Status != common.OrderStatusCancelled &&
 		remaining.Status != common.OrderStatusRejected {
 		s.addToBook(remaining)
-		s.emitOrderPlaced(remaining)
+		s.emitOrderPlaced(ctx, remaining)
 	}
 
 	so.resultCh <- shardResult{
@@ -299,7 +309,7 @@ func (s *shard) addToBook(order *Order) {
 
 // Event emission methods
 
-func (s *shard) emitOrderPlaced(order *Order) {
+func (s *shard) emitOrderPlaced(ctx context.Context, order *Order) {
 	if s.eventBus == nil {
 		return
 	}
@@ -320,10 +330,10 @@ func (s *shard) emitOrderPlaced(order *Order) {
 		TimeInForce: string(order.TimeInForce),
 		Status:      string(order.Status),
 	})
-	_ = s.eventBus.Publish(context.Background(), "order.placed", evt)
+	_ = s.eventBus.Publish(ctx, "order.placed", evt)
 }
 
-func (s *shard) emitTradeExecuted(m *MatchResult) {
+func (s *shard) emitTradeExecuted(ctx context.Context, m *MatchResult) {
 	if s.eventBus == nil {
 		return
 	}
@@ -333,7 +343,7 @@ func (s *shard) emitTradeExecuted(m *MatchResult) {
 		Timestamp: time.Now(),
 	}
 	evt.SetPayload(events.TradeExecutedPayload{
-		TradeID:      "", // filled by settlement service
+		TradeID:      "",
 		TakerOrderID: m.TakerOrderID,
 		MakerOrderID: m.MakerOrderID,
 		TakerUserID:  m.TakerUserID,
@@ -343,11 +353,12 @@ func (s *shard) emitTradeExecuted(m *MatchResult) {
 		Quantity:     m.Quantity.String(),
 		QuoteQty:     m.QuoteQty.String(),
 		TakerSide:    string(m.TakerSide),
+			Timestamp:    m.Timestamp,
 	})
-	_ = s.eventBus.Publish(context.Background(), "trade.executed", evt)
+	_ = s.eventBus.Publish(ctx, "trade.executed", evt)
 }
 
-func (s *shard) emitOrderFilled(order *Order, matches []*MatchResult) {
+func (s *shard) emitOrderFilled(ctx context.Context, order *Order, matches []*MatchResult) {
 	if s.eventBus == nil {
 		return
 	}
@@ -357,20 +368,35 @@ func (s *shard) emitOrderFilled(order *Order, matches []*MatchResult) {
 		Timestamp: time.Now(),
 	}
 	evt.SetPayload(events.OrderMatchedPayload{
-		OrderID:  order.OrderID,
-		UserID:   order.UserID,
-		Symbol:   string(order.Symbol),
-		Side:     string(order.Side),
-		Status:   "filled",
+		OrderID: order.OrderID,
+		UserID:  order.UserID,
+		Symbol:  string(order.Symbol),
+		Side:    string(order.Side),
+		Status:  "filled",
 	})
-	_ = s.eventBus.Publish(context.Background(), "order.matched", evt)
+	_ = s.eventBus.Publish(ctx, "order.matched", evt)
 }
 
-func (s *shard) emitOrderPartiallyFilled(order *Order, matches []*MatchResult) {
-	// Same event type with partial fill status
+func (s *shard) emitOrderPartiallyFilled(ctx context.Context, order *Order, matches []*MatchResult) {
+	if s.eventBus == nil {
+		return
+	}
+	evt := &events.Event{
+		ID:        events.NewEventID(),
+		Type:      events.EventOrderMatched,
+		Timestamp: time.Now(),
+	}
+	evt.SetPayload(events.OrderMatchedPayload{
+		OrderID: order.OrderID,
+		UserID:  order.UserID,
+		Symbol:  string(order.Symbol),
+		Side:    string(order.Side),
+		Status:  "partially_filled",
+	})
+	_ = s.eventBus.Publish(ctx, "order.matched", evt)
 }
 
-func (s *shard) emitOrderCancelled(order *Order) {
+func (s *shard) emitOrderCancelled(ctx context.Context, order *Order) {
 	if s.eventBus == nil {
 		return
 	}
@@ -384,10 +410,10 @@ func (s *shard) emitOrderCancelled(order *Order) {
 		UserID:  order.UserID,
 		Symbol:  string(order.Symbol),
 	})
-	_ = s.eventBus.Publish(context.Background(), "order.cancelled", evt)
+	_ = s.eventBus.Publish(ctx, "order.cancelled", evt)
 }
 
-func (s *shard) emitOrderRejected(order *Order) {
+func (s *shard) emitOrderRejected(ctx context.Context, order *Order) {
 	if s.eventBus == nil {
 		return
 	}
@@ -397,13 +423,10 @@ func (s *shard) emitOrderRejected(order *Order) {
 		Timestamp: time.Now(),
 	}
 	evt.SetPayload(events.OrderPlacedPayload{
-		OrderID:  order.OrderID,
-		UserID:   order.UserID,
-		Symbol:   string(order.Symbol),
-		Status:   "rejected",
+		OrderID: order.OrderID,
+		UserID:  order.UserID,
+		Symbol:  string(order.Symbol),
+		Status:  "rejected",
 	})
-	_ = s.eventBus.Publish(context.Background(), "order.placed", evt)
+	_ = s.eventBus.Publish(ctx, "order.placed", evt)
 }
-
-// Ensure decimal import is used (for future extensions)
-var _ = decimal.Zero

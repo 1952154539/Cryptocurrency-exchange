@@ -101,8 +101,7 @@ type priceLevel struct {
 }
 
 // OrderBook holds bids and asks for a single trading pair.
-// Single-writer pattern: the owning shard goroutine is the only writer.
-// Reads (snapshots) acquire a brief RLock.
+// All methods are safe for concurrent use: writers acquire Lock, readers acquire RLock.
 type OrderBook struct {
 	symbol common.Symbol
 	bids   []*priceLevel // descending by price (highest bid at index 0)
@@ -126,7 +125,10 @@ func (ob *OrderBook) Symbol() common.Symbol {
 }
 
 // addBid inserts a bid order at the correct price level (descending order).
+// Must be called while ob.mu is held (by processOrder or MatchOrder).
 func (ob *OrderBook) addBid(order *Order) {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
 	ob.seqNum++
 	order.Status = common.OrderStatusOpen
 
@@ -153,7 +155,10 @@ func (ob *OrderBook) addBid(order *Order) {
 }
 
 // addAsk inserts an ask order at the correct price level (ascending order).
+// Must be called while ob.mu is held (by processOrder or MatchOrder).
 func (ob *OrderBook) addAsk(order *Order) {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
 	ob.seqNum++
 	order.Status = common.OrderStatusOpen
 
@@ -178,7 +183,11 @@ func (ob *OrderBook) addAsk(order *Order) {
 }
 
 // CancelOrder removes an order from the book. Returns the order if found.
+// Safe for concurrent use: acquires Lock for external callers.
 func (ob *OrderBook) CancelOrder(orderID string) *Order {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+
 	// Search bids
 	for i, pl := range ob.bids {
 		if o := pl.orders.remove(orderID); o != nil {
@@ -216,6 +225,9 @@ func (ob *OrderBook) removeAskLevel(i int) {
 
 // BestBid returns the highest bid price (0 if no bids).
 func (ob *OrderBook) BestBid() decimal.Decimal {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
 	if len(ob.bids) == 0 {
 		return decimal.Zero
 	}
@@ -224,6 +236,9 @@ func (ob *OrderBook) BestBid() decimal.Decimal {
 
 // BestAsk returns the lowest ask price (0 if no asks).
 func (ob *OrderBook) BestAsk() decimal.Decimal {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
 	if len(ob.asks) == 0 {
 		return decimal.Zero
 	}
@@ -232,6 +247,9 @@ func (ob *OrderBook) BestAsk() decimal.Decimal {
 
 // Spread returns the difference between best ask and best bid.
 func (ob *OrderBook) Spread() decimal.Decimal {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
 	if len(ob.bids) == 0 || len(ob.asks) == 0 {
 		return decimal.Zero
 	}
@@ -240,6 +258,9 @@ func (ob *OrderBook) Spread() decimal.Decimal {
 
 // GetOrder finds an order in the book by ID.
 func (ob *OrderBook) GetOrder(orderID string) *Order {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
 	for _, pl := range ob.bids {
 		for n := pl.orders.head; n != nil; n = n.next {
 			if n.order.OrderID == orderID {
@@ -298,11 +319,17 @@ func (ob *OrderBook) Snapshot(depth int) *BookSnapshot {
 
 // Size returns total number of price levels (bids + asks).
 func (ob *OrderBook) Size() (bids, asks int) {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
 	return len(ob.bids), len(ob.asks)
 }
 
 // Dump prints the current order book state for debugging.
 func (ob *OrderBook) Dump() string {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
 	s := fmt.Sprintf("=== %s Order Book ===\n", ob.symbol)
 	s += "Bids:\n"
 	for _, pl := range ob.bids {

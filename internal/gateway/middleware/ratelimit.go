@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -83,13 +84,40 @@ func (rl *RateLimiter) allow(key string, rate, capacity float64) bool {
 	return bucket.Allow()
 }
 
+// StartCleanup periodically removes stale buckets to prevent memory leaks.
+func (rl *RateLimiter) StartCleanup(ctx context.Context, interval, ttl time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			rl.cleanup(ttl)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (rl *RateLimiter) cleanup(ttl time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	cutoff := time.Now().Add(-ttl)
+	for key, bucket := range rl.buckets {
+		bucket.mu.Lock()
+		if bucket.lastTime.Before(cutoff) {
+			delete(rl.buckets, key)
+		}
+		bucket.mu.Unlock()
+	}
+}
+
 // Middleware returns an HTTP middleware that applies rate limiting.
+// Uses r.RemoteAddr which is set by chi's RealIP middleware (handles X-Forwarded-For correctly).
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			ip = forwarded
-		}
 
 		if !rl.AllowIP(ip) {
 			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)

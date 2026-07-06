@@ -23,13 +23,14 @@ type StoredUser struct {
 
 // Service handles user management.
 type Service struct {
-	pool *pgxpool.Pool
-	auth *AuthService
+	pool           *pgxpool.Pool
+	auth           *AuthService
+	productionMode bool
 }
 
 // NewService creates a user service.
-func NewService(pool *pgxpool.Pool, auth *AuthService) *Service {
-	return &Service{pool: pool, auth: auth}
+func NewService(pool *pgxpool.Pool, auth *AuthService, productionMode bool) *Service {
+	return &Service{pool: pool, auth: auth, productionMode: productionMode}
 }
 
 // RegisterUser creates a new user account.
@@ -57,12 +58,14 @@ func (s *Service) RegisterUser(ctx context.Context, email, password string) (*St
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
 
-	// Create default USDT balance for trading
-	if _, err := s.pool.Exec(ctx,
-		`INSERT INTO accounts (user_id, currency, balance) VALUES ($1, 'USDT', 1000000), ($1, 'ETH', 100)`,
-		userID,
-	); err != nil {
-		return nil, fmt.Errorf("create accounts: %w", err)
+	// Create default balances for trading in non-production environments
+	if !s.productionMode {
+		if _, err := s.pool.Exec(ctx,
+			`INSERT INTO accounts (user_id, currency, balance) VALUES ($1, 'USDT', 1000000), ($1, 'ETH', 100)`,
+			userID,
+		); err != nil {
+			return nil, fmt.Errorf("create accounts: %w", err)
+		}
 	}
 
 	return &StoredUser{

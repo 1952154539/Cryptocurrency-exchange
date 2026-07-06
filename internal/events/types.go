@@ -55,6 +55,10 @@ type EventBus interface {
 	Close() error
 }
 
+// Compile-time interface compliance checks.
+var _ EventBus = (*MemoryEventBus)(nil)
+var _ EventBus = (*RedisEventBus)(nil)
+
 // EventHandler is a function that processes events.
 type EventHandler func(ctx context.Context, event *Event) error
 
@@ -100,6 +104,7 @@ type TradeExecutedPayload struct {
 	Quantity     string `json:"quantity"`
 	QuoteQty     string `json:"quote_qty"`
 	TakerSide    string `json:"taker_side"`
+	Timestamp    int64  `json:"timestamp"`
 }
 
 type BalanceChangedPayload struct {

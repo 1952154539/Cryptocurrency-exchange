@@ -4,6 +4,29 @@ import (
 	"github.com/exchange/internal/common"
 )
 
+// orderTransitions defines all valid order state transitions.
+var orderTransitions = map[common.OrderStatus][]common.OrderStatus{
+	common.OrderStatusCreated: {
+		common.OrderStatusOpen,
+		common.OrderStatusPartiallyFilled,
+		common.OrderStatusRejected,
+		common.OrderStatusCancelled,
+		common.OrderStatusFilled,
+	},
+	common.OrderStatusOpen: {
+		common.OrderStatusPartiallyFilled,
+		common.OrderStatusFilled,
+		common.OrderStatusCancelled,
+		common.OrderStatusExpired,
+	},
+	common.OrderStatusPartiallyFilled: {
+		common.OrderStatusPartiallyFilled,
+		common.OrderStatusFilled,
+		common.OrderStatusCancelled,
+		common.OrderStatusExpired,
+	},
+}
+
 // StateMachine manages order lifecycle transitions.
 type StateMachine struct{}
 
@@ -14,28 +37,7 @@ func NewStateMachine() *StateMachine {
 
 // CanTransition checks if an order can move from current status to new status.
 func (sm *StateMachine) CanTransition(current, next common.OrderStatus) bool {
-	transitions := map[common.OrderStatus][]common.OrderStatus{
-		common.OrderStatusCreated: {
-			common.OrderStatusOpen,
-			common.OrderStatusRejected,
-			common.OrderStatusCancelled,
-			common.OrderStatusFilled, // market orders fill immediately
-		},
-		common.OrderStatusOpen: {
-			common.OrderStatusPartiallyFilled,
-			common.OrderStatusFilled,
-			common.OrderStatusCancelled,
-			common.OrderStatusExpired,
-		},
-		common.OrderStatusPartiallyFilled: {
-			common.OrderStatusPartiallyFilled,
-			common.OrderStatusFilled,
-			common.OrderStatusCancelled,
-			common.OrderStatusExpired,
-		},
-	}
-
-	allowed, ok := transitions[current]
+	allowed, ok := orderTransitions[current]
 	if !ok {
 		return false
 	}
@@ -50,25 +52,5 @@ func (sm *StateMachine) CanTransition(current, next common.OrderStatus) bool {
 
 // ValidTransitions from a given state.
 func (sm *StateMachine) ValidTransitions(current common.OrderStatus) []common.OrderStatus {
-	transitions := map[common.OrderStatus][]common.OrderStatus{
-		common.OrderStatusCreated: {
-			common.OrderStatusOpen,
-			common.OrderStatusRejected,
-			common.OrderStatusCancelled,
-			common.OrderStatusFilled,
-		},
-		common.OrderStatusOpen: {
-			common.OrderStatusPartiallyFilled,
-			common.OrderStatusFilled,
-			common.OrderStatusCancelled,
-			common.OrderStatusExpired,
-		},
-		common.OrderStatusPartiallyFilled: {
-			common.OrderStatusPartiallyFilled,
-			common.OrderStatusFilled,
-			common.OrderStatusCancelled,
-			common.OrderStatusExpired,
-		},
-	}
-	return transitions[current]
+	return orderTransitions[current]
 }

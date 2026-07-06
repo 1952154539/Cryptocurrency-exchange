@@ -38,12 +38,12 @@ func (s *Service) SettleTrade(ctx context.Context, match *matching.MatchResult) 
 	}
 	defer tx.Rollback(ctx)
 
-	tradeID := common.NewTradeID()
+	tradeID := fmt.Sprintf("trd_%s_%s", match.MakerOrderID, match.TakerOrderID)
 	symbol := common.Symbol(match.Symbol)
 
 	// Calculate fees
-	makerFee := s.feeSvc.CalculateFee(ctx, match.MakerUserID, true, match.Quantity)
-	takerFee := s.feeSvc.CalculateFee(ctx, match.TakerUserID, false, match.Quantity)
+	makerFee := s.feeSvc.CalculateFee(ctx, match.MakerUserID, true, match.QuoteQty)
+	takerFee := s.feeSvc.CalculateFee(ctx, match.TakerUserID, false, match.QuoteQty)
 
 	var takerBaseDelta, takerQuoteDelta, makerBaseDelta, makerQuoteDelta decimal.Decimal
 
@@ -71,6 +71,13 @@ func (s *Service) SettleTrade(ctx context.Context, match *matching.MatchResult) 
 	}
 	if err := s.updateBalance(ctx, tx, match.MakerUserID, symbol.Quote(), makerQuoteDelta); err != nil {
 		return fmt.Errorf("update maker quote balance: %w", err)
+	}
+
+	// Collect fees to exchange revenue account
+	feeAccountID := "00000000-0000-0000-0000-000000000000" // exchange fee collection account
+	totalFees := makerFee.Add(takerFee)
+	if err := s.updateBalance(ctx, tx, feeAccountID, symbol.Quote(), totalFees); err != nil {
+		return fmt.Errorf("collect exchange fees: %w", err)
 	}
 
 	// Record trade
@@ -106,6 +113,12 @@ func (s *Service) updateBalance(ctx context.Context, tx pgx.Tx, userID string, c
 	var currentBalance decimal.Decimal
 	var currentVersion int64
 
+	// INSERT first to handle missing accounts, then SELECT FOR UPDATE atomically.
+	_, _ = tx.Exec(ctx,
+		`INSERT INTO accounts (user_id, currency, balance, frozen_balance, version) VALUES ($1, $2, '0', '0', 1)
+		 ON CONFLICT (user_id, currency) DO NOTHING`,
+		userID, string(currency))
+
 	query := `SELECT balance, version FROM accounts WHERE user_id = $1 AND currency = $2 FOR UPDATE`
 	err := tx.QueryRow(ctx, query, userID, string(currency)).Scan(&currentBalance, &currentVersion)
 	if err != nil {
@@ -117,8 +130,12 @@ func (s *Service) updateBalance(ctx context.Context, tx pgx.Tx, userID string, c
 		return fmt.Errorf("%w: would go negative (%s → %s)", common.ErrInsufficientBalance, currentBalance.String(), newBalance.String())
 	}
 
-	updateQuery := `UPDATE accounts SET balance = $1, version = version + 1, updated_at = NOW() WHERE user_id = $2 AND currency = $3 AND version = $4`
-	ct, err := tx.Exec(ctx, updateQuery, newBalance.String(), userID, string(currency), currentVersion)
+	updateQuery := `UPDATE accounts SET balance = $1, frozen_balance = GREATEST(frozen_balance + $5, 0), version = version + 1, updated_at = NOW() WHERE user_id = $2 AND currency = $3 AND version = $4`
+		frozenAdjust := decimal.Zero
+		if delta.IsNegative() {
+			frozenAdjust = delta // negative, reduces frozen_balance
+		}
+	ct, err := tx.Exec(ctx, updateQuery, newBalance.String(), userID, string(currency), currentVersion, frozenAdjust.String())
 	if err != nil {
 		return fmt.Errorf("update balance: %w", err)
 	}
@@ -127,7 +144,9 @@ func (s *Service) updateBalance(ctx context.Context, tx pgx.Tx, userID string, c
 	}
 
 	auditQuery := `INSERT INTO balance_transactions (user_id, currency, type, amount, balance_before, balance_after) VALUES ($1, $2, 'trade_fill', $3, $4, $5)`
-	_, _ = tx.Exec(ctx, auditQuery, userID, string(currency), delta.String(), currentBalance.String(), newBalance.String())
+	if _, err := tx.Exec(ctx, auditQuery, userID, string(currency), delta.String(), currentBalance.String(), newBalance.String()); err != nil {
+			log.Warn().Err(err).Str("user_id", userID).Str("currency", string(currency)).Msg("audit log insert failed")
+		}
 
 	return nil
 }
@@ -136,6 +155,7 @@ func (s *Service) updateBalance(ctx context.Context, tx pgx.Tx, userID string, c
 func (s *Service) insertTrade(ctx context.Context, tx pgx.Tx, tradeID string, match *matching.MatchResult, makerFee, takerFee decimal.Decimal) error {
 	query := `
 		INSERT INTO trades (trade_id, symbol, maker_order_id, taker_order_id, maker_user_id, taker_user_id, price, quantity, quote_quantity, maker_fee, taker_fee, side, executed_at)
+			ON CONFLICT (trade_id) DO NOTHING
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	_, err := tx.Exec(ctx, query,

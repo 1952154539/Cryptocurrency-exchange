@@ -2,7 +2,10 @@ package wallet
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/exchange/internal/common"
@@ -14,21 +17,25 @@ import (
 
 // Service handles wallet operations: deposits, withdrawals, address generation.
 type Service struct {
-	pool     *pgxpool.Pool
-	eventBus events.EventBus
-	hotWallet  *HotWallet
+	pool      *pgxpool.Pool
+	eventBus  events.EventBus
+	hotWallet *HotWallet
+	masterKey *ExtendedKey
+	addrIdx   map[string]uint32 // next address index per user+currency+chain
+	idxMu     sync.Mutex
 }
 
 // HotWallet manages online signing keys for withdrawals.
 type HotWallet struct {
-	balanceCap map[common.Currency]decimal.Decimal // max balance per currency in hot wallet
+	balanceCap map[common.Currency]decimal.Decimal
 }
 
 // NewService creates a wallet service.
 func NewService(pool *pgxpool.Pool, eventBus events.EventBus) *Service {
 	return &Service{
-		pool:    pool,
-		eventBus: eventBus,
+		pool:      pool,
+		eventBus:  eventBus,
+		addrIdx:   make(map[string]uint32),
 		hotWallet: &HotWallet{
 			balanceCap: map[common.Currency]decimal.Decimal{
 				"ETH":  decimalMust("500"),
@@ -38,6 +45,30 @@ func NewService(pool *pgxpool.Pool, eventBus events.EventBus) *Service {
 	}
 }
 
+// LoadMasterSeed initializes the HD wallet from a hex-encoded seed.
+func (s *Service) LoadMasterSeed(seedHex string) error {
+	seed, err := hex.DecodeString(seedHex)
+	if err != nil {
+		return fmt.Errorf("decode seed hex: %w", err)
+	}
+	mk, err := MasterKeyFromSeed(seed)
+	if err != nil {
+		return fmt.Errorf("derive master key: %w", err)
+	}
+	s.masterKey = mk
+	log.Info().Msg("HD wallet master key loaded")
+	return nil
+}
+
+// LoadOrGenerateMasterSeed loads the seed from env, or generates a random one for dev.
+func (s *Service) LoadOrGenerateMasterSeed(seedHex string) error {
+	if seedHex == "" {
+		log.Warn().Msg("no WALLET_MASTER_SEED_HEX set, deposit addresses will use random keys (NOT for production)")
+		return nil
+	}
+	return s.LoadMasterSeed(seedHex)
+}
+
 func decimalMust(s string) decimal.Decimal {
 	d, _ := decimal.NewFromString(s)
 	return d
@@ -45,7 +76,7 @@ func decimalMust(s string) decimal.Decimal {
 
 // GenerateDepositAddress creates a new deposit address for a user.
 func (s *Service) GenerateDepositAddress(ctx context.Context, userID string, currency common.Currency, chain common.Chain) (string, error) {
-	// Check if user already has an address for this currency+chain
+	// Check existing address
 	var existing string
 	err := s.pool.QueryRow(ctx,
 		`SELECT address FROM deposit_addresses WHERE user_id = $1 AND currency = $2 AND chain = $3`,
@@ -57,14 +88,31 @@ func (s *Service) GenerateDepositAddress(ctx context.Context, userID string, cur
 	}
 
 	// Generate new address
-	// In production, this uses the HD wallet to derive the next unused address
-	masterKey, err := GenerateMasterKey()
-	if err != nil {
-		return "", fmt.Errorf("generate key: %w", err)
-	}
+	var address string
 
-	address := PublicAddress(masterKey)
-	derivationPath := fmt.Sprintf("m/44'/60'/0'/0/%d", time.Now().UnixNano()%10000)
+	var derivationPath string
+	if s.masterKey != nil {
+		// Derive deterministically from master seed using BIP44
+		s.idxMu.Lock()
+		idxKey := fmt.Sprintf("%s:%s:%s", userID, currency, chain)
+		index := s.addrIdx[idxKey]
+		s.addrIdx[idxKey] = index + 1
+		s.idxMu.Unlock()
+
+		var err error
+		address, _, derivationPath, err = DeriveBIP44AddressForUser(s.masterKey, userID, index)
+		if err != nil {
+			return "", fmt.Errorf("derive bip44: %w", err)
+		}
+	} else {
+		// Fallback: generate random key (dev mode without seed)
+		mk, err := MasterKeyFromSeed(randomSeed())
+		if err != nil {
+			return "", fmt.Errorf("generate fallback key: %w", err)
+		}
+		address = PublicAddress(mk.Key)
+		derivationPath = "random"
+	}
 
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO deposit_addresses (user_id, currency, chain, address, derivation_path, wallet_type)
@@ -85,9 +133,17 @@ func (s *Service) GenerateDepositAddress(ctx context.Context, userID string, cur
 	return address, nil
 }
 
+// randomSeed generates a 32-byte random seed for dev fallback.
+func randomSeed() []byte {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return b
+}
+
 // ProcessDeposit handles a detected on-chain deposit.
 func (s *Service) ProcessDeposit(ctx context.Context, deposit *DepositEvent) error {
-	// Find the user by deposit address
 	var userID string
 	err := s.pool.QueryRow(ctx,
 		`SELECT user_id FROM deposit_addresses WHERE address = $1 AND chain = $2`,
@@ -97,7 +153,6 @@ func (s *Service) ProcessDeposit(ctx context.Context, deposit *DepositEvent) err
 		return fmt.Errorf("unknown deposit address %s: %w", deposit.ToAddress, err)
 	}
 
-	// Insert deposit record (UNIQUE constraint prevents double-crediting)
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO deposits (tx_hash, currency, chain, from_address, to_address, amount, block_number, confirmations, required_confs, status, user_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -111,7 +166,6 @@ func (s *Service) ProcessDeposit(ctx context.Context, deposit *DepositEvent) err
 		return fmt.Errorf("insert deposit: %w", err)
 	}
 
-	// If already confirmed, credit user balance
 	if deposit.Confirmations >= deposit.RequiredConfirmations {
 		return s.confirmDeposit(ctx, deposit.TxHash, deposit.ToAddress, userID, deposit.Amount, deposit.Currency)
 	}
@@ -127,7 +181,6 @@ func (s *Service) confirmDeposit(ctx context.Context, txHash, toAddress, userID 
 	}
 	defer tx.Rollback(ctx)
 
-	// Update deposit status
 	ct, err := tx.Exec(ctx,
 		`UPDATE deposits SET status = 'confirmed', credited_at = NOW() WHERE tx_hash = $1 AND to_address = $2 AND status = 'pending'`,
 		txHash, toAddress,
@@ -136,19 +189,20 @@ func (s *Service) confirmDeposit(ctx context.Context, txHash, toAddress, userID 
 		return fmt.Errorf("update deposit status: %w", err)
 	}
 	if ct.RowsAffected() == 0 {
-		return nil // already processed
+		return nil
 	}
 
-	// Credit user balance
 	_, err = tx.Exec(ctx,
-		`UPDATE accounts SET balance = balance + $1, updated_at = NOW() WHERE user_id = $2 AND currency = $3`,
-		amount.String(), userID, currency,
+		`INSERT INTO accounts (user_id, currency, balance, frozen_balance, version)
+		 VALUES ($1, $2, $3, '0', 1)
+		 ON CONFLICT (user_id, currency) DO UPDATE
+		 SET balance = accounts.balance + EXCLUDED.balance, updated_at = NOW()`,
+		userID, currency, amount.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("credit balance: %w", err)
 	}
 
-	// Record audit
 	_, _ = tx.Exec(ctx,
 		`INSERT INTO balance_transactions (user_id, currency, type, amount, balance_before, balance_after, reference_id)
 		 VALUES ($1, $2, 'deposit', $3, 0, $3, $4)`,
@@ -166,17 +220,21 @@ func (s *Service) confirmDeposit(ctx context.Context, txHash, toAddress, userID 
 		Str("amount", amount.String()).
 		Msg("deposit confirmed")
 
-	// Emit event
 	s.emitDepositConfirmed(ctx, userID, currency, amount, txHash)
 
 	return nil
 }
 
-// RequestWithdrawal initiates a withdrawal.
+// RequestWithdrawal initiates a withdrawal within a database transaction.
 func (s *Service) RequestWithdrawal(ctx context.Context, req *WithdrawalRequest) (*WithdrawalResult, error) {
-	// 1. Check balance
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	var balance decimal.Decimal
-	err := s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT balance FROM accounts WHERE user_id = $1 AND currency = $2 FOR UPDATE`,
 		req.UserID, req.Currency,
 	).Scan(&balance)
@@ -189,8 +247,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, req *WithdrawalRequest)
 		return nil, common.ErrInsufficientBalance
 	}
 
-	// 2. Debit balance
-	_, err = s.pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`UPDATE accounts SET balance = balance - $1, updated_at = NOW() WHERE user_id = $2 AND currency = $3`,
 		total.String(), req.UserID, req.Currency,
 	)
@@ -198,14 +255,13 @@ func (s *Service) RequestWithdrawal(ctx context.Context, req *WithdrawalRequest)
 		return nil, fmt.Errorf("debit balance: %w", err)
 	}
 
-	// 3. Create withdrawal record
 	withdrawalID := common.NewWithdrawalID()
 	walletType := "hot"
 	if req.Amount.Cmp(s.hotWallet.balanceCap[common.Currency(req.Currency)]) > 0 {
 		walletType = "cold"
 	}
 
-	_, err = s.pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO withdrawals (withdrawal_id, user_id, currency, chain, to_address, amount, fee, wallet_type, status)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')`,
 		withdrawalID, req.UserID, req.Currency, req.Chain,
@@ -213,6 +269,10 @@ func (s *Service) RequestWithdrawal(ctx context.Context, req *WithdrawalRequest)
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert withdrawal: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit withdrawal: %w", err)
 	}
 
 	log.Info().

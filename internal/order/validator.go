@@ -3,8 +3,6 @@ package order
 import (
 	"context"
 	"fmt"
-	"math/big"
-	"strings"
 
 	"github.com/exchange/internal/common"
 	"github.com/exchange/internal/common/decimal"
@@ -134,7 +132,7 @@ func (v *Validator) Validate(ctx context.Context, req *PlaceOrderRequest) error 
 	}
 
 	// 10. Rate limit check
-	if !v.rateLimiter.Allow(ctx, req.UserID, 20) {
+	if v.rateLimiter != nil && !v.rateLimiter.Allow(ctx, req.UserID, 20) {
 		return common.ErrRateLimitExceeded
 	}
 
@@ -160,8 +158,15 @@ func (v *Validator) checkBalance(ctx context.Context, req *PlaceOrderRequest, ma
 		// For buys, need quote currency
 		var required decimal.Decimal
 		if req.Type == common.OrderTypeMarket {
-			// For market buys, we don't know the exact price — check with a buffer
-			// In production, you'd estimate based on the current order book depth
+			// For market buys, verify user has at least some balance
+			// Full price is unknown until matching, but we check that the account exists
+			balance, err := v.balances.GetBalance(ctx, req.UserID, market.QuoteCurrency)
+			if err != nil {
+				return err
+			}
+			if balance.IsZero() {
+				return fmt.Errorf("%w: zero balance for %s", common.ErrInsufficientBalance, market.QuoteCurrency)
+			}
 			return nil
 		}
 		required = req.Price.Mul(req.Quantity)
@@ -192,12 +197,17 @@ func (v *Validator) validPrecision(value, step decimal.Decimal) bool {
 	if step.IsZero() {
 		return true
 	}
-	// value % step == 0
-	q := value.Div(step)
-	// Check that q is an integer (no fractional part)
-	qStr := q.String()
-	return !strings.Contains(qStr, ".")
+	// Use modulo: remainder = value % step using big.Int math
+	remainder := value.Mod(step)
+	return remainder.IsZero()
 }
 
-// Ensure big import is used
-var _ = new(big.Int)
+// BalanceProvider returns the configured balance provider.
+func (v *Validator) BalanceProvider() BalanceProvider {
+	return v.balances
+}
+
+// MarketInfo returns market configuration for a symbol.
+func (v *Validator) MarketInfo(symbol common.Symbol) *MarketConfig {
+	return v.markets[symbol]
+}

@@ -5,12 +5,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/exchange/internal/common"
 	"github.com/exchange/internal/config"
 	"github.com/exchange/internal/events"
 	"github.com/exchange/internal/matching"
 	"github.com/exchange/internal/telemetry"
+	"github.com/go-redis/redis/v8"
 	"github.com/rs/zerolog/log"
 )
 
@@ -21,8 +23,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// In-memory event bus for MVP (use Kafka in production)
-	eventBus := events.NewMemoryEventBus()
+	// Redis-backed event bus for inter-process communication
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr()})
+	eventBus := events.NewRedisEventBus(rdb)
+	defer eventBus.Close()
 
 	// Create matching engine
 	engine := matching.NewEngine(eventBus)
@@ -43,7 +47,9 @@ func main() {
 	<-ctx.Done()
 
 	log.Info().Msg("shutting down matching engine")
-	if err := engine.Stop(context.Background()); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := engine.Stop(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("error during shutdown")
 	}
 	eventBus.Close()
